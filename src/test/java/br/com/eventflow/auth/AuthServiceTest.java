@@ -14,14 +14,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.hibernate.exception.ConstraintViolationException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -141,8 +140,20 @@ class AuthServiceTest {
         when(passwordEncoder.encode("strong-password"))
                 .thenReturn("encoded-password");
 
+        ConstraintViolationException constraintViolation =
+                mock(ConstraintViolationException.class);
+
+        when(constraintViolation.getConstraintName())
+                .thenReturn("users_email_key");
+
+        DataIntegrityViolationException databaseException =
+                new DataIntegrityViolationException(
+                        "Database constraint violation",
+                        constraintViolation
+                );
+
         when(userRepository.saveAndFlush(any(User.class)))
-                .thenThrow(new DataIntegrityViolationException("duplicate email"));
+                .thenThrow(databaseException);
 
         ConflictException exception = assertThrows(
                 ConflictException.class,
@@ -153,5 +164,43 @@ class AuthServiceTest {
                 "Email is already registered",
                 exception.getMessage()
         );
+    }
+
+    @Test
+    void shouldNotConvertUnrelatedDatabaseConstraintViolationToDuplicateEmail() {
+        RegisterUserRequest request = new RegisterUserRequest(
+                "Samuel Gomes",
+                "samuel@example.com",
+                "strong-password",
+                UserRole.PARTICIPANT
+        );
+
+        when(userRepository.existsByEmail("samuel@example.com"))
+                .thenReturn(false);
+
+        when(passwordEncoder.encode("strong-password"))
+                .thenReturn("encoded-password");
+
+        ConstraintViolationException constraintViolation =
+                mock(ConstraintViolationException.class);
+
+        when(constraintViolation.getConstraintName())
+                .thenReturn("chk_users_role");
+
+        DataIntegrityViolationException databaseException =
+                new DataIntegrityViolationException(
+                        "Database constraint violation",
+                        constraintViolation
+                );
+
+        when(userRepository.saveAndFlush(any(User.class)))
+                .thenThrow(databaseException);
+
+        DataIntegrityViolationException exception = assertThrows(
+                DataIntegrityViolationException.class,
+                () -> authService.register(request)
+        );
+
+        assertEquals(databaseException, exception);
     }
 }

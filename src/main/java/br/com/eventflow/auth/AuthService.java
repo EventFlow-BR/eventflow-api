@@ -6,6 +6,7 @@ import br.com.eventflow.shared.exception.ConflictException;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import jakarta.transaction.Transactional;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -14,6 +15,8 @@ import java.util.Locale;
 
 @Service
 public class AuthService {
+
+    private static final String USERS_EMAIL_UNIQUE_CONSTRAINT = "users_email_key";
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -50,7 +53,11 @@ public class AuthService {
         try {
             savedUser = userRepository.saveAndFlush(user);
         } catch (DataIntegrityViolationException exception) {
-            throw new ConflictException("Email is already registered");
+            if (isEmailUniqueConstraintViolation(exception)) {
+                throw new ConflictException("Email is already registered");
+            }
+
+            throw exception;
         }
 
         return new RegisterUserResponse(
@@ -59,5 +66,23 @@ public class AuthService {
                 savedUser.getEmail(),
                 savedUser.getRole()
         );
+    }
+
+    private boolean isEmailUniqueConstraintViolation(
+            DataIntegrityViolationException exception
+    ) {
+        Throwable cause = exception;
+
+        while (cause != null) {
+            if (cause instanceof ConstraintViolationException constraintViolation) {
+                return USERS_EMAIL_UNIQUE_CONSTRAINT.equals(
+                        constraintViolation.getConstraintName()
+                );
+            }
+
+            cause = cause.getCause();
+        }
+
+        return false;
     }
 }
