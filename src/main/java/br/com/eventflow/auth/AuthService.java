@@ -1,8 +1,8 @@
 package br.com.eventflow.auth;
 
-import br.com.eventflow.auth.dto.RegisterUserRequest;
-import br.com.eventflow.auth.dto.RegisterUserResponse;
+import br.com.eventflow.auth.dto.*;
 import br.com.eventflow.shared.exception.ConflictException;
+import br.com.eventflow.shared.exception.UnauthorizedException;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import jakarta.transaction.Transactional;
@@ -20,13 +20,16 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
 
     public AuthService(
             UserRepository userRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
     }
 
     @Transactional
@@ -84,5 +87,35 @@ public class AuthService {
         }
 
         return false;
+    }
+
+    @Transactional
+    public LoginResult login(LoginRequest request) {
+        String normalizedEmail = request.email()
+                .trim()
+                .toLowerCase(Locale.ROOT);
+
+        User user = userRepository.findByEmail(normalizedEmail)
+                .orElseThrow(() ->
+                        new UnauthorizedException("Invalid email or password")
+                );
+
+        if(!passwordEncoder.matches(
+                request.password(),
+                user.getPasswordHash()
+        )) {
+            throw new UnauthorizedException("Invalid email or password");
+        }
+
+        String token = jwtService.generateToken(user);
+
+        LoginResponse response = new LoginResponse(
+                user.getUserId(),
+                user.getName(),
+                user.getEmail(),
+                user.getRole()
+        );
+
+        return new LoginResult(token, response);
     }
 }

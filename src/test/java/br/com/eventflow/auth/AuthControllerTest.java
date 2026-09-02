@@ -1,7 +1,6 @@
 package br.com.eventflow.auth;
 
-import br.com.eventflow.auth.dto.RegisterUserRequest;
-import br.com.eventflow.auth.dto.RegisterUserResponse;
+import br.com.eventflow.auth.dto.*;
 import br.com.eventflow.shared.exception.ConflictException;
 import br.com.eventflow.shared.exception.GlobalExceptionHandler;
 import br.com.eventflow.user.UserRole;
@@ -9,20 +8,31 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import br.com.eventflow.shared.exception.UnauthorizedException;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import org.springframework.test.context.TestPropertySource;
 
 @WebMvcTest
 @Import({
         AuthController.class,
         GlobalExceptionHandler.class
+})
+@TestPropertySource(properties = {
+        "app.auth.cookie-name=eventflow_token",
+        "app.auth.cookie-secure=false"
 })
 class AuthControllerTest {
 
@@ -31,6 +41,9 @@ class AuthControllerTest {
 
     @MockitoBean
     private AuthService authService;
+
+    @MockitoBean
+    private JwtService jwtService;
 
     @Test
     void shouldRegisterParticipant() throws Exception {
@@ -110,5 +123,117 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.error").value("Conflict"))
                 .andExpect(jsonPath("$.message").value("Email is already registered"))
                 .andExpect(jsonPath("$.path").value("/api/auth/register"));
+    }
+
+    @Test
+    void shouldLoginAndReturnJwtInHttpOnlyCookie() throws Exception {
+        LoginResponse response = new LoginResponse(
+                1L,
+                "Samuel Gomes",
+                "samuel@example.com",
+                UserRole.PARTICIPANT
+        );
+
+        LoginResult loginResult = new LoginResult(
+                "signed-jwt-token",
+                response
+        );
+
+        when(authService.login(any(LoginRequest.class)))
+                .thenReturn(loginResult);
+
+        when(jwtService.getExpirationSeconds())
+                .thenReturn(3600L);
+
+        String requestBody = """
+            {
+              "email": "samuel@example.com",
+              "password": "strong-password"
+            }
+            """;
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        "Set-Cookie",
+                        containsString("eventflow_token=signed-jwt-token")
+                ))
+                .andExpect(header().string(
+                        "Set-Cookie",
+                        containsString("HttpOnly")
+                ))
+                .andExpect(header().string(
+                        "Set-Cookie",
+                        containsString("SameSite=Lax")
+                ))
+                .andExpect(header().string(
+                        "Set-Cookie",
+                        containsString("Path=/")
+                ))
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.name").value("Samuel Gomes"))
+                .andExpect(jsonPath("$.email").value("samuel@example.com"))
+                .andExpect(jsonPath("$.role").value("PARTICIPANT"))
+                .andExpect(jsonPath("$.token").doesNotExist())
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.passwordHash").doesNotExist())
+                .andExpect(content().string(
+                        not(containsString("signed-jwt-token"))
+                ))
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        not(containsString("Secure"))
+                ));
+    }
+
+    @Test
+    void shouldReturnUnauthorizedWhenCredentialsAreInvalid() throws Exception {
+        when(authService.login(any(LoginRequest.class)))
+                .thenThrow(
+                        new UnauthorizedException(
+                                "Invalid email or password"
+                        )
+                );
+
+        String requestBody = """
+            {
+              "email": "samuel@example.com",
+              "password": "wrong-password"
+            }
+            """;
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("Unauthorized"))
+                .andExpect(jsonPath("$.message")
+                        .value("Invalid email or password"))
+                .andExpect(jsonPath("$.path")
+                        .value("/api/auth/login"))
+                .andExpect(header().doesNotExist("Set-Cookie"));
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenLoginRequestIsInvalid() throws Exception {
+        String requestBody = """
+            {
+              "email": "invalid-email",
+              "password": ""
+            }
+            """;
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message")
+                        .value("Request validation failed"))
+                .andExpect(jsonPath("$.fieldErrors.email").exists())
+                .andExpect(jsonPath("$.fieldErrors.password").exists());
     }
 }

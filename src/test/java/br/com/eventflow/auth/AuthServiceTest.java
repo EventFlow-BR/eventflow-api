@@ -1,8 +1,11 @@
 package br.com.eventflow.auth;
 
+import br.com.eventflow.auth.dto.LoginRequest;
+import br.com.eventflow.auth.dto.LoginResult;
 import br.com.eventflow.auth.dto.RegisterUserRequest;
 import br.com.eventflow.auth.dto.RegisterUserResponse;
 import br.com.eventflow.shared.exception.ConflictException;
+import br.com.eventflow.shared.exception.UnauthorizedException;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
@@ -15,6 +18,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.hibernate.exception.ConstraintViolationException;
+
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -31,11 +36,18 @@ class AuthServiceTest {
     @Mock
     private PasswordEncoder passwordEncoder;
 
+    @Mock
+    private JwtService jwtService;
+
     private AuthService authService;
 
     @BeforeEach
     void setUp() {
-        authService = new AuthService(userRepository, passwordEncoder);
+        authService = new AuthService(
+                userRepository,
+                passwordEncoder,
+                jwtService
+        );
     }
 
     @Test
@@ -202,5 +214,108 @@ class AuthServiceTest {
         );
 
         assertEquals(databaseException, exception);
+    }
+
+    @Test
+    void shouldLoginWithNormalizedEmailAndValidPassword() {
+        LoginRequest request = new LoginRequest(
+                " Samuel@Example.COM ",
+                "strong-password"
+        );
+
+        User user = new User(
+                "Samuel Gomes",
+                "samuel@example.com",
+                "encoded-password",
+                UserRole.PARTICIPANT
+        );
+
+        when(userRepository.findByEmail("samuel@example.com"))
+                .thenReturn(Optional.of(user));
+
+        when(passwordEncoder.matches(
+                "strong-password",
+                "encoded-password"
+        )).thenReturn(true);
+
+        when(jwtService.generateToken(user))
+                .thenReturn("jwt-token");
+
+        LoginResult result = authService.login(request);
+
+        assertEquals("jwt-token", result.token());
+        assertEquals("Samuel Gomes", result.user().name());
+        assertEquals("samuel@example.com", result.user().email());
+        assertEquals(UserRole.PARTICIPANT, result.user().role());
+
+        verify(userRepository).findByEmail("samuel@example.com");
+        verify(passwordEncoder).matches(
+                "strong-password",
+                "encoded-password"
+        );
+        verify(jwtService).generateToken(user);
+    }
+
+    @Test
+    void shouldRejectLoginWhenEmailDoesNotExist() {
+        LoginRequest request = new LoginRequest(
+                "missing@example.com",
+                "strong-password"
+        );
+
+        when(userRepository.findByEmail("missing@example.com"))
+                .thenReturn(Optional.empty());
+
+        UnauthorizedException exception = assertThrows(
+                UnauthorizedException.class,
+                () -> authService.login(request)
+        );
+
+        assertEquals(
+                "Invalid email or password",
+                exception.getMessage()
+        );
+
+        verify(passwordEncoder, never())
+                .matches(anyString(), anyString());
+
+        verify(jwtService, never())
+                .generateToken(any());
+    }
+
+    @Test
+    void shouldRejectLoginWhenPasswordIsInvalid() {
+        LoginRequest request = new LoginRequest(
+                "samuel@example.com",
+                "wrong-password"
+        );
+
+        User user = new User(
+                "Samuel Gomes",
+                "samuel@example.com",
+                "encoded-password",
+                UserRole.PARTICIPANT
+        );
+
+        when(userRepository.findByEmail("samuel@example.com"))
+                .thenReturn(Optional.of(user));
+
+        when(passwordEncoder.matches(
+                "wrong-password",
+                "encoded-password"
+        )).thenReturn(false);
+
+        UnauthorizedException exception = assertThrows(
+                UnauthorizedException.class,
+                () -> authService.login(request)
+        );
+
+        assertEquals(
+                "Invalid email or password",
+                exception.getMessage()
+        );
+
+        verify(jwtService, never())
+                .generateToken(any());
     }
 }
