@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -22,11 +23,16 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import org.springframework.test.context.TestPropertySource;
 
 @WebMvcTest
 @Import({
         AuthController.class,
         GlobalExceptionHandler.class
+})
+@TestPropertySource(properties = {
+        "app.auth.cookie-name=eventflow_token",
+        "app.auth.cookie-secure=false"
 })
 class AuthControllerTest {
 
@@ -175,6 +181,10 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.passwordHash").doesNotExist())
                 .andExpect(content().string(
                         not(containsString("signed-jwt-token"))
+                ))
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        not(containsString("Secure"))
                 ));
     }
 

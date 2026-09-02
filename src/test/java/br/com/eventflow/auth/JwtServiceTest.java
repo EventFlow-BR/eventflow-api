@@ -13,11 +13,13 @@ class JwtServiceTest {
     private static final String SECRET =
             "eventflow-test-secret-key-with-at-least-32-bytes";
 
+    private static final long EXPIRATION_MILLISECONDS = 3_600_000L;
+
     private final JwtService jwtService =
-            new JwtService(SECRET, 3_600_000);
+            new JwtService(SECRET, EXPIRATION_MILLISECONDS);
 
     @Test
-    void shouldGenerateTokenWithUserIdAndRole() {
+    void shouldGenerateTokenWithUserIdRoleAndConfiguredExpiration() {
         User user = new User(
                 "Samuel Gomes",
                 "samuel@example.com",
@@ -36,6 +38,12 @@ class JwtServiceTest {
         assertEquals("PARTICIPANT", claims.get("role"));
         assertNotNull(claims.getIssuedAt());
         assertNotNull(claims.getExpiration());
+
+        long tokenDuration =
+                claims.getExpiration().getTime()
+                        - claims.getIssuedAt().getTime();
+
+        assertEquals(EXPIRATION_MILLISECONDS, tokenDuration);
     }
 
     private void setUserIdForTest(User user, Long userId) {

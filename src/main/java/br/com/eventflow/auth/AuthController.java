@@ -27,7 +27,7 @@ public class AuthController {
             AuthService authService,
             JwtService jwtService,
             @Value("${app.auth.cookie-name}") String cookieName,
-            @Value("${app.auth.cookie-secure:false}") boolean cookieSecure
+            @Value("${app.auth.cookie-secure}") boolean cookieSecure
     ) {
         this.authService = authService;
         this.jwtService = jwtService;
