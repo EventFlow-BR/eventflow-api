@@ -118,4 +118,18 @@ public class AuthService {
 
         return new LoginResult(token, response);
     }
+
+    public CurrentUserResponse getCurrentUser(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new UnauthorizedException("Authentication is no longer valid")
+                );
+
+        return new CurrentUserResponse(
+                user.getUserId(),
+                user.getName(),
+                user.getEmail(),
+                user.getRole()
+        );
+    }
 }

@@ -1,9 +1,6 @@
 package br.com.eventflow.auth;
 
-import br.com.eventflow.auth.dto.LoginRequest;
-import br.com.eventflow.auth.dto.LoginResult;
-import br.com.eventflow.auth.dto.RegisterUserRequest;
-import br.com.eventflow.auth.dto.RegisterUserResponse;
+import br.com.eventflow.auth.dto.*;
 import br.com.eventflow.shared.exception.ConflictException;
 import br.com.eventflow.shared.exception.UnauthorizedException;
 import br.com.eventflow.user.User;
@@ -317,5 +314,51 @@ class AuthServiceTest {
 
         verify(jwtService, never())
                 .generateToken(any());
+    }
+
+    @Test
+    void shouldReturnCurrentUser() {
+        User user = new User(
+                "Samuel Gomes",
+                "samuel@example.com",
+                "encoded-password",
+                UserRole.PARTICIPANT
+        );
+
+        setUserIdForTest(user, 10L);
+
+        when(userRepository.findById(10L))
+                .thenReturn(Optional.of(user));
+
+        CurrentUserResponse response =
+                authService.getCurrentUser(10L);
+
+        assertEquals(10L, response.id());
+        assertEquals("Samuel Gomes", response.name());
+        assertEquals("samuel@example.com", response.email());
+        assertEquals(UserRole.PARTICIPANT, response.role());
+
+        verify(userRepository).findById(10L);
+    }
+
+    @Test
+    void shouldRejectCurrentUserWhenUserNoLongerExists() {
+        when(userRepository.findById(10L))
+                .thenReturn(Optional.empty());
+
+        assertThrows(
+                UnauthorizedException.class,
+                () -> authService.getCurrentUser(10L)
+        );
+    }
+
+    private void setUserIdForTest(User user, Long userId) {
+        try {
+            var field = User.class.getDeclaredField("userId");
+            field.setAccessible(true);
+            field.set(user, userId);
+        } catch (ReflectiveOperationException exception) {
+            throw new RuntimeException(exception);
+        }
     }
 }
