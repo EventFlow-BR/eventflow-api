@@ -133,6 +133,87 @@ class SecurityConfigTest {
                 .andExpect(content().string("10"));
     }
 
+    @Test
+    void shouldRejectProtectedEndpointWithMalformedJwtCookie()
+            throws Exception {
+
+        mockMvc.perform(
+                        get("/test/authenticated")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                "not-a-valid-jwt"
+                                        )
+                                )
+                )
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void shouldRejectProtectedEndpointWithExpiredJwtCookie()
+            throws Exception {
+
+        JwtService expiredJwtService =
+                new JwtService(
+                        "eventflow-test-secret-key-with-at-least-32-bytes",
+                        -1_000L
+                );
+
+        User user = new User(
+                "Security User",
+                "expired@example.com",
+                "encoded-password",
+                UserRole.PARTICIPANT
+        );
+
+        setUserIdForTest(user, 10L);
+
+        String expiredToken =
+                expiredJwtService.generateToken(user);
+
+        mockMvc.perform(
+                        get("/test/authenticated")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                expiredToken
+                                        )
+                                )
+                )
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void shouldRejectProtectedEndpointWithTamperedJwtCookie()
+            throws Exception {
+
+        User user = new User(
+                "Security User",
+                "tampered@example.com",
+                "encoded-password",
+                UserRole.PARTICIPANT
+        );
+
+        setUserIdForTest(user, 10L);
+
+        String token = jwtService.generateToken(user);
+
+        String tamperedToken =
+                token.substring(0, token.length() - 1)
+                        + (token.endsWith("a") ? "b" : "a");
+
+        mockMvc.perform(
+                        get("/test/authenticated")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                tamperedToken
+                                        )
+                                )
+                )
+                .andExpect(status().is4xxClientError());
+    }
+
     @TestConfiguration
     static class TestEndpointsConfiguration {
 

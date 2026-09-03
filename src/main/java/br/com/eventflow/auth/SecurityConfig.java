@@ -25,6 +25,9 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
+                // Logout currently only clears the authentication cookie.
+                // It is temporarily excluded from CSRF protection until the final
+                // CSRF strategy for authenticated state-changing endpoints is implemented.
                 .csrf(csrf -> csrf
                         .ignoringRequestMatchers(
                                 "/api/auth/register",
