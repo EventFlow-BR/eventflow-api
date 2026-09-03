@@ -1,21 +1,26 @@
 package br.com.eventflow.auth;
 
+import br.com.eventflow.user.User;
+import br.com.eventflow.user.UserRole;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.test.context.ActiveProfiles;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -33,18 +38,21 @@ class SecurityConfigTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private JwtService jwtService;
+
     @Test
     void shouldAllowRegisterWithoutAuthentication() throws Exception {
         mockMvc.perform(post("/api/auth/register")
                         .contentType("application/json")
                         .content("""
-                        {
-                          "name": "Samuel Gomes",
-                          "email": "security-test@example.com",
-                          "password": "strong-password",
-                          "role": "PARTICIPANT"
-                        }
-                        """))
+                                {
+                                  "name": "Samuel Gomes",
+                                  "email": "security-test@example.com",
+                                  "password": "strong-password",
+                                  "role": "PARTICIPANT"
+                                }
+                                """))
                 .andExpect(result -> {
                     int status = result.getResponse().getStatus();
 
@@ -61,11 +69,11 @@ class SecurityConfigTest {
         mockMvc.perform(post("/api/auth/login")
                         .contentType("application/json")
                         .content("""
-                        {
-                          "email": "missing@example.com",
-                          "password": "strong-password"
-                        }
-                        """))
+                                {
+                                  "email": "missing@example.com",
+                                  "password": "strong-password"
+                                }
+                                """))
                 .andExpect(result -> {
                     int status = result.getResponse().getStatus();
 
@@ -89,6 +97,42 @@ class SecurityConfigTest {
                 .andExpect(status().is4xxClientError());
     }
 
+    @Test
+    void shouldProtectCurrentUserEndpointWithoutAuthentication()
+            throws Exception {
+
+        mockMvc.perform(get("/api/auth/me"))
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void shouldAuthenticateProtectedEndpointWithValidJwtCookie()
+            throws Exception {
+
+        User user = new User(
+                "Security User",
+                "security@example.com",
+                "encoded-password",
+                UserRole.PARTICIPANT
+        );
+
+        setUserIdForTest(user, 10L);
+
+        String token = jwtService.generateToken(user);
+
+        mockMvc.perform(
+                        get("/test/authenticated")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(content().string("10"));
+    }
+
     @TestConfiguration
     static class TestEndpointsConfiguration {
 
@@ -104,6 +148,23 @@ class SecurityConfigTest {
         @GetMapping("/test/protected")
         ResponseEntity<Void> protectedEndpoint() {
             return ResponseEntity.ok().build();
+        }
+
+        @GetMapping("/test/authenticated")
+        ResponseEntity<Long> authenticated(Authentication authentication) {
+            return ResponseEntity.ok(
+                    (Long) authentication.getPrincipal()
+            );
+        }
+    }
+
+    private void setUserIdForTest(User user, Long userId) {
+        try {
+            var field = User.class.getDeclaredField("userId");
+            field.setAccessible(true);
+            field.set(user, userId);
+        } catch (ReflectiveOperationException exception) {
+            throw new RuntimeException(exception);
         }
     }
 }

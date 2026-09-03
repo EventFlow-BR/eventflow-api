@@ -1,6 +1,7 @@
 package br.com.eventflow.auth;
 
 import br.com.eventflow.user.User;
+import br.com.eventflow.user.UserRole;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -51,5 +52,25 @@ public class JwtService {
 
     public long getExpirationSeconds() {
         return expiration / 1000;
+    }
+
+    public Long extractUserId(String token) {
+        Claims claims = parseToken(token);
+
+        return Long.valueOf(claims.getSubject());
+    }
+
+    public UserRole extractRole(String token) {
+        Claims claims = parseToken(token);
+
+        String role = claims.get("role", String.class);
+
+        if (role == null) {
+            throw new IllegalArgumentException(
+                    "JWT role claim is missing"
+            );
+        }
+
+        return UserRole.valueOf(role);
     }
 }

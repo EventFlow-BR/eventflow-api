@@ -13,6 +13,16 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import br.com.eventflow.shared.exception.UnauthorizedException;
+import org.springframework.test.context.TestPropertySource;
+import br.com.eventflow.auth.dto.CurrentUserResponse;
+
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+
+import java.util.List;
+
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -23,7 +33,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
-import org.springframework.test.context.TestPropertySource;
+
 
 @WebMvcTest
 @Import({
@@ -235,5 +245,113 @@ class AuthControllerTest {
                         .value("Request validation failed"))
                 .andExpect(jsonPath("$.fieldErrors.email").exists())
                 .andExpect(jsonPath("$.fieldErrors.password").exists());
+    }
+
+    @Test
+    void shouldReturnCurrentAuthenticatedUser() throws Exception {
+        CurrentUserResponse response =
+                new CurrentUserResponse(
+                        10L,
+                        "Samuel Gomes",
+                        "samuel@example.com",
+                        UserRole.PARTICIPANT
+                );
+
+        when(authService.getCurrentUser(10L))
+                .thenReturn(response);
+
+        mockMvc.perform(
+                        get("/api/auth/me")
+                                .principal(
+                                        new UsernamePasswordAuthenticationToken(
+                                                10L,
+                                                null,
+                                                List.of(
+                                                        new SimpleGrantedAuthority(
+                                                                "ROLE_PARTICIPANT"
+                                                        )
+                                                )
+                                        )
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(10))
+                .andExpect(jsonPath("$.name").value("Samuel Gomes"))
+                .andExpect(jsonPath("$.email").value("samuel@example.com"))
+                .andExpect(jsonPath("$.role").value("PARTICIPANT"))
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.passwordHash").doesNotExist())
+                .andExpect(jsonPath("$.token").doesNotExist());
+
+        verify(authService).getCurrentUser(10L);
+    }
+
+    @Test
+    void shouldReturnUnauthorizedWhenAuthenticatedUserNoLongerExists()
+            throws Exception {
+
+        when(authService.getCurrentUser(10L))
+                .thenThrow(
+                        new UnauthorizedException(
+                                "Authentication is no longer valid"
+                        )
+                );
+
+        mockMvc.perform(
+                        get("/api/auth/me")
+                                .principal(
+                                        new UsernamePasswordAuthenticationToken(
+                                                10L,
+                                                null,
+                                                List.of(
+                                                        new SimpleGrantedAuthority(
+                                                                "ROLE_PARTICIPANT"
+                                                        )
+                                                )
+                                        )
+                                )
+                )
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void shouldLogoutAndClearAuthenticationCookie() throws Exception {
+        mockMvc.perform(post("/api/auth/logout"))
+                .andExpect(status().isNoContent())
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        containsString("eventflow_token=")
+                ))
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        containsString("Max-Age=0")
+                ))
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        containsString("HttpOnly")
+                ))
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        containsString("SameSite=Lax")
+                ))
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        containsString("Path=/")
+                ))
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        not(containsString("Secure"))
+                ));
+    }
+
+    @Test
+    void shouldLogoutWithoutReturningToken() throws Exception {
+        mockMvc.perform(post("/api/auth/logout"))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""))
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        not(containsString("Secure"))
+                ));
     }
 }
