@@ -1,5 +1,6 @@
 package br.com.eventflow.auth;
 
+import br.com.eventflow.event.EventService;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRole;
 import jakarta.servlet.http.Cookie;
@@ -10,10 +11,12 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,6 +25,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -40,6 +44,9 @@ class SecurityConfigTest {
 
     @Autowired
     private JwtService jwtService;
+
+    @MockitoBean
+    private EventService eventService;
 
     @Test
     void shouldAllowRegisterWithoutAuthentication() throws Exception {
@@ -214,6 +221,81 @@ class SecurityConfigTest {
                 .andExpect(status().is4xxClientError());
     }
 
+    @Test
+    void shouldAllowOrganizerToCreateEvent() throws Exception {
+        User organizer = new User(
+                "Organizer",
+                "organizer@example.com",
+                "encoded-password",
+                UserRole.ORGANIZER
+        );
+
+        setUserIdForTest(organizer, 10L);
+
+        String token = jwtService.generateToken(organizer);
+
+        mockMvc.perform(
+                        post("/api/events")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(validEventRequestBody())
+                )
+                .andExpect(result -> {
+                    int status = result.getResponse().getStatus();
+
+                    if (status == 401 || status == 403) {
+                        throw new AssertionError(
+                                "Organizer should be authorized to create events, but returned " + status
+                        );
+                    }
+                });
+    }
+
+    @Test
+    void shouldRejectParticipantCreatingEvent() throws Exception {
+        User participant = new User(
+                "Participant",
+                "participant@example.com",
+                "encoded-password",
+                UserRole.PARTICIPANT
+        );
+
+        setUserIdForTest(participant, 20L);
+
+        String token = jwtService.generateToken(participant);
+
+        mockMvc.perform(
+                        post("/api/events")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(validEventRequestBody())
+                )
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedEventCreation() throws Exception {
+        mockMvc.perform(
+                        post("/api/events")
+                                .with(csrf())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(validEventRequestBody())
+                )
+                .andExpect(status().is4xxClientError());
+    }
+
     @TestConfiguration
     static class TestEndpointsConfiguration {
 
@@ -237,6 +319,20 @@ class SecurityConfigTest {
                     (Long) authentication.getPrincipal()
             );
         }
+    }
+
+    private String validEventRequestBody() {
+        return """
+                {
+                  "name": "Java Conference",
+                  "description": "Backend conference",
+                  "location": "Petrópolis",
+                  "startDate": "2026-10-10T10:00:00-03:00",
+                  "endDate": "2026-10-10T18:00:00-03:00",
+                  "capacity": 100,
+                  "price": 50.00
+                }
+                """;
     }
 
     private void setUserIdForTest(User user, Long userId) {

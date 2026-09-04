@@ -22,11 +22,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest
-@Import({
-        AuthController.class,
-        GlobalExceptionHandler.class
-})
+@WebMvcTest(controllers = AuthController.class)
+@Import(GlobalExceptionHandler.class)
 @TestPropertySource(properties = {
         "app.auth.cookie-name=eventflow_token",
         "app.auth.cookie-secure=true"
