@@ -2,6 +2,7 @@ package br.com.eventflow.event;
 
 import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
+import br.com.eventflow.shared.exception.BadRequestException;
 import br.com.eventflow.shared.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -35,14 +37,8 @@ class EventControllerTest {
     private EventService eventService;
 
     @Test
-    void shouldCreateEventForAuthenticatedOrganizer()
+    void shouldCreateEventUsingAuthenticatedOrganizerId()
             throws Exception {
-
-        OffsetDateTime startDate =
-                OffsetDateTime.parse("2026-10-10T10:00:00-03:00");
-
-        OffsetDateTime endDate =
-                OffsetDateTime.parse("2026-10-10T18:00:00-03:00");
 
         EventResponse response =
                 new EventResponse(
@@ -51,36 +47,24 @@ class EventControllerTest {
                         "Java Conference",
                         "Backend conference",
                         "Petrópolis",
-                        startDate,
-                        endDate,
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
                         100,
                         new BigDecimal("50.00"),
                         EventStatus.DRAFT,
                         null,
-                        OffsetDateTime.parse(
-                                "2026-09-04T09:00:00-03:00"
-                        ),
-                        OffsetDateTime.parse(
-                                "2026-09-04T09:00:00-03:00"
-                        )
+                        null,
+                        null
                 );
 
         when(eventService.createEvent(
-                any(Long.class),
+                eq(10L),
                 any(CreateEventRequest.class)
         )).thenReturn(response);
-
-        String requestBody = """
-                {
-                  "name": "Java Conference",
-                  "description": "Backend conference",
-                  "location": "Petrópolis",
-                  "startDate": "2026-10-10T10:00:00-03:00",
-                  "endDate": "2026-10-10T18:00:00-03:00",
-                  "capacity": 100,
-                  "price": 50.00
-                }
-                """;
 
         mockMvc.perform(
                         post("/api/events")
@@ -96,7 +80,7 @@ class EventControllerTest {
                                         )
                                 )
                                 .contentType(MediaType.APPLICATION_JSON)
-                                .content(requestBody)
+                                .content(validRequestBody())
                 )
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(100))
@@ -108,42 +92,32 @@ class EventControllerTest {
 
         verify(eventService)
                 .createEvent(
-                        any(Long.class),
+                        eq(10L),
                         any(CreateEventRequest.class)
                 );
     }
 
     @Test
-    void shouldReturnBadRequestWhenCreateEventPayloadIsInvalid()
+    void shouldReturnBadRequestWhenPayloadIsInvalid()
             throws Exception {
-
-        String requestBody = """
-                {
-                  "name": "",
-                  "description": "",
-                  "location": "",
-                  "startDate": null,
-                  "endDate": null,
-                  "capacity": 0,
-                  "price": -1
-                }
-                """;
 
         mockMvc.perform(
                         post("/api/events")
                                 .principal(
-                                        new UsernamePasswordAuthenticationToken(
-                                                10L,
-                                                null,
-                                                List.of(
-                                                        new SimpleGrantedAuthority(
-                                                                "ROLE_ORGANIZER"
-                                                        )
-                                                )
-                                        )
+                                        organizerAuthentication()
                                 )
                                 .contentType(MediaType.APPLICATION_JSON)
-                                .content(requestBody)
+                                .content("""
+                                        {
+                                          "name": "",
+                                          "description": "",
+                                          "location": "",
+                                          "startDate": null,
+                                          "endDate": null,
+                                          "capacity": 0,
+                                          "price": -1
+                                        }
+                                        """)
                 )
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.name").exists())
@@ -153,5 +127,83 @@ class EventControllerTest {
                 .andExpect(jsonPath("$.fieldErrors.endDate").exists())
                 .andExpect(jsonPath("$.fieldErrors.capacity").exists())
                 .andExpect(jsonPath("$.fieldErrors.price").exists());
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenPriceExceedsAllowedPrecision()
+            throws Exception {
+
+        mockMvc.perform(
+                        post("/api/events")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "name": "Java Conference",
+                                          "description": "Backend conference",
+                                          "location": "Petrópolis",
+                                          "startDate": "2026-10-10T10:00:00-03:00",
+                                          "endDate": "2026-10-10T18:00:00-03:00",
+                                          "capacity": 100,
+                                          "price": 123456789.123
+                                        }
+                                        """)
+                )
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenServiceRejectsInvalidDates()
+            throws Exception {
+
+        when(eventService.createEvent(
+                eq(10L),
+                any(CreateEventRequest.class)
+        )).thenThrow(
+                new BadRequestException(
+                        "Event start must be before end date"
+                )
+        );
+
+        mockMvc.perform(
+                        post("/api/events")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(validRequestBody())
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message")
+                        .value("Event start must be before end date"));
+    }
+
+    private UsernamePasswordAuthenticationToken organizerAuthentication() {
+        return new UsernamePasswordAuthenticationToken(
+                10L,
+                null,
+                List.of(
+                        new SimpleGrantedAuthority(
+                                "ROLE_ORGANIZER"
+                        )
+                )
+        );
+    }
+
+    private String validRequestBody() {
+        return """
+                {
+                  "name": "Java Conference",
+                  "description": "Backend conference",
+                  "location": "Petrópolis",
+                  "startDate": "2026-10-10T10:00:00-03:00",
+                  "endDate": "2026-10-10T18:00:00-03:00",
+                  "capacity": 100,
+                  "price": 50.00
+                }
+                """;
     }
 }

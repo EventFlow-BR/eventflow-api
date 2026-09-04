@@ -3,6 +3,7 @@ package br.com.eventflow.event;
 import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
 import br.com.eventflow.shared.exception.BadRequestException;
+import br.com.eventflow.shared.exception.ForbiddenException;
 import br.com.eventflow.shared.exception.UnauthorizedException;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
@@ -37,7 +38,7 @@ public class EventService {
                 );
 
         if (organizer.getRole() != UserRole.ORGANIZER) {
-            throw new IllegalStateException(
+            throw new ForbiddenException(
                     "Only organizers can create events"
             );
         }

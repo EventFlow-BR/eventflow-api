@@ -3,6 +3,8 @@ package br.com.eventflow.event;
 import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
 import br.com.eventflow.shared.exception.BadRequestException;
+import br.com.eventflow.shared.exception.ForbiddenException;
+import br.com.eventflow.shared.exception.UnauthorizedException;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
@@ -43,16 +45,7 @@ class EventServiceTest {
 
     @Test
     void shouldCreateEventForOrganizer() {
-        User organizer = new User(
-                "Event Organizer",
-                "organizer@example.com",
-                "encoded-password",
-                UserRole.ORGANIZER
-        );
-
-        setUserIdForTest(organizer, 10L);
-
-        CreateEventRequest request = validRequest();
+        User organizer = organizer(10L);
 
         when(userRepository.findById(10L))
                 .thenReturn(Optional.of(organizer));
@@ -61,7 +54,10 @@ class EventServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         EventResponse response =
-                eventService.createEvent(10L, request);
+                eventService.createEvent(
+                        10L,
+                        validRequest()
+                );
 
         ArgumentCaptor<Event> eventCaptor =
                 ArgumentCaptor.forClass(Event.class);
@@ -81,43 +77,6 @@ class EventServiceTest {
     }
 
     @Test
-    void shouldRejectEventWhenStartDateIsNotBeforeEndDate() {
-        User organizer = new User(
-                "Event Organizer",
-                "organizer@example.com",
-                "encoded-password",
-                UserRole.ORGANIZER
-        );
-
-        setUserIdForTest(organizer, 10L);
-
-        OffsetDateTime date =
-                OffsetDateTime.now().plusDays(10);
-
-        CreateEventRequest request =
-                new CreateEventRequest(
-                        "Java Conference",
-                        "Backend conference",
-                        "Petrópolis",
-                        date,
-                        date,
-                        100,
-                        new BigDecimal("50.00")
-                );
-
-        when(userRepository.findById(10L))
-                .thenReturn(Optional.of(organizer));
-
-        assertThrows(
-                BadRequestException.class,
-                () -> eventService.createEvent(10L, request)
-        );
-
-        verify(eventRepository, never())
-                .save(any());
-    }
-
-    @Test
     void shouldRejectParticipantCreatingEvent() {
         User participant = new User(
                 "Participant",
@@ -131,10 +90,101 @@ class EventServiceTest {
         when(userRepository.findById(20L))
                 .thenReturn(Optional.of(participant));
 
-        assertThrows(
-                IllegalStateException.class,
+        ForbiddenException exception = assertThrows(
+                ForbiddenException.class,
                 () -> eventService.createEvent(
                         20L,
+                        validRequest()
+                )
+        );
+
+        assertEquals(
+                "Only organizers can create events",
+                exception.getMessage()
+        );
+
+        verify(eventRepository, never())
+                .save(any());
+    }
+
+    @Test
+    void shouldRejectEventWhenStartDateEqualsEndDate() {
+        User organizer = organizer(10L);
+
+        when(userRepository.findById(10L))
+                .thenReturn(Optional.of(organizer));
+
+        OffsetDateTime date =
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                );
+
+        CreateEventRequest request =
+                new CreateEventRequest(
+                        "Java Conference",
+                        "Backend conference",
+                        "Petrópolis",
+                        date,
+                        date,
+                        100,
+                        new BigDecimal("50.00")
+                );
+
+        assertThrows(
+                BadRequestException.class,
+                () -> eventService.createEvent(
+                        10L,
+                        request
+                )
+        );
+
+        verify(eventRepository, never())
+                .save(any());
+    }
+
+    @Test
+    void shouldRejectEventWhenStartDateIsAfterEndDate() {
+        User organizer = organizer(10L);
+
+        when(userRepository.findById(10L))
+                .thenReturn(Optional.of(organizer));
+
+        CreateEventRequest request =
+                new CreateEventRequest(
+                        "Java Conference",
+                        "Backend conference",
+                        "Petrópolis",
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        100,
+                        new BigDecimal("50.00")
+                );
+
+        assertThrows(
+                BadRequestException.class,
+                () -> eventService.createEvent(
+                        10L,
+                        request
+                )
+        );
+
+        verify(eventRepository, never())
+                .save(any());
+    }
+
+    @Test
+    void shouldRejectCreationWhenAuthenticatedUserNoLongerExists() {
+        when(userRepository.findById(10L))
+                .thenReturn(Optional.empty());
+
+        assertThrows(
+                UnauthorizedException.class,
+                () -> eventService.createEvent(
+                        10L,
                         validRequest()
                 )
         );
@@ -148,18 +198,41 @@ class EventServiceTest {
                 "Java Conference",
                 "Backend conference",
                 "Petrópolis",
-                OffsetDateTime.now().plusDays(10),
-                OffsetDateTime.now().plusDays(10).plusHours(8),
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
                 100,
                 new BigDecimal("50.00")
         );
     }
 
-    private void setUserIdForTest(User user, Long userId) {
+    private User organizer(Long userId) {
+        User organizer = new User(
+                "Organizer",
+                "organizer@example.com",
+                "encoded-password",
+                UserRole.ORGANIZER
+        );
+
+        setUserIdForTest(organizer, userId);
+
+        return organizer;
+    }
+
+    private void setUserIdForTest(
+            User user,
+            Long userId
+    ) {
         try {
-            var field = User.class.getDeclaredField("userId");
+            var field =
+                    User.class.getDeclaredField("userId");
+
             field.setAccessible(true);
             field.set(user, userId);
+
         } catch (ReflectiveOperationException exception) {
             throw new RuntimeException(exception);
         }
