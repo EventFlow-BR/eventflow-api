@@ -169,4 +169,8 @@ public class Event {
         this.status = EventStatus.PUBLISHED;
         this.publishedAt = publishedAt;
     }
+
+    public void cancel() {
+        this.status = EventStatus.CANCELLED;
+    }
 }

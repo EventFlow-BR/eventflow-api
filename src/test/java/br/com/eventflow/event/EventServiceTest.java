@@ -16,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 
@@ -728,6 +729,189 @@ class EventServiceTest {
         );
     }
 
+    @Test
+    void shouldCancelOwnDraftEvent() {
+        User organizer = organizer(10L);
+
+        Event event = futureEvent(organizer);
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        EventResponse response =
+                eventService.cancelEvent(
+                        100L,
+                        10L
+                );
+
+        assertEquals(
+                EventStatus.CANCELLED,
+                response.status()
+        );
+
+        verify(eventRepository).flush();
+    }
+
+    @Test
+    void shouldCancelOwnPublishedEvent() {
+        User organizer = organizer(10L);
+
+        Event event = futureEvent(organizer);
+
+        event.publish(
+                OffsetDateTime.now()
+                        .minusDays(1)
+                        .truncatedTo(ChronoUnit.MICROS)
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        EventResponse response =
+                eventService.cancelEvent(
+                        100L,
+                        10L
+                );
+
+        assertEquals(
+                EventStatus.CANCELLED,
+                response.status()
+        );
+    }
+
+    @Test
+    void shouldHideEventWhenAnotherOrganizerTriesToCancel() {
+        User owner = organizer(10L);
+
+        Event event = futureEvent(owner);
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        NotFoundException exception =
+                assertThrows(
+                        NotFoundException.class,
+                        () -> eventService.cancelEvent(
+                                100L,
+                                20L
+                        )
+                );
+
+        assertEquals(
+                "Event not found",
+                exception.getMessage()
+        );
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenCancellingUnknownEvent() {
+        when(eventRepository.findById(999L))
+                .thenReturn(Optional.empty());
+
+        assertThrows(
+                NotFoundException.class,
+                () -> eventService.cancelEvent(
+                        999L,
+                        10L
+                )
+        );
+    }
+
+    @Test
+    void shouldRejectCancellingAlreadyCancelledEvent() {
+        User organizer = organizer(10L);
+
+        Event event = futureEvent(organizer);
+        event.cancel();
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        ConflictException exception =
+                assertThrows(
+                        ConflictException.class,
+                        () -> eventService.cancelEvent(
+                                100L,
+                                10L
+                        )
+                );
+
+        assertEquals(
+                "Event cannot be cancelled in its current status",
+                exception.getMessage()
+        );
+
+        verify(eventRepository, never()).flush();
+    }
+
+    @Test
+    void shouldRejectCancellingEventThatAlreadyStarted() {
+        User organizer = organizer(10L);
+
+        Event event = new Event(
+                organizer,
+                "Java Conference",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.now()
+                        .minusHours(1),
+                OffsetDateTime.now()
+                        .plusHours(5),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        ConflictException exception =
+                assertThrows(
+                        ConflictException.class,
+                        () -> eventService.cancelEvent(
+                                100L,
+                                10L
+                        )
+                );
+
+        assertEquals(
+                "Event cannot be cancelled after it has started",
+                exception.getMessage()
+        );
+
+        verify(eventRepository, never()).flush();
+    }
+
+    @Test
+    void shouldRejectCancellingFinishedEvent() {
+        User organizer = organizer(10L);
+
+        Event event = futureEvent(organizer);
+
+        setEventStatusForTest(
+                event,
+                EventStatus.FINISHED
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        ConflictException exception =
+                assertThrows(
+                        ConflictException.class,
+                        () -> eventService.cancelEvent(
+                                100L,
+                                10L
+                        )
+                );
+
+        assertEquals(
+                "Event cannot be cancelled in its current status",
+                exception.getMessage()
+        );
+
+        verify(eventRepository, never()).flush();
+    }
+
     private CreateEventRequest validRequest() {
         return new CreateEventRequest(
                 "Java Conference",
@@ -800,6 +984,22 @@ class EventServiceTest {
                 OffsetDateTime.parse(
                         "2026-11-10T18:00:00-03:00"
                 ),
+                100,
+                new BigDecimal("50.00")
+        );
+    }
+
+    private Event futureEvent(User organizer) {
+        return new Event(
+                organizer,
+                "Java Conference",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.now()
+                        .plusDays(7),
+                OffsetDateTime.now()
+                        .plusDays(7)
+                        .plusHours(8),
                 100,
                 new BigDecimal("50.00")
         );

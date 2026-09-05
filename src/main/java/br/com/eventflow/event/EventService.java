@@ -190,6 +190,47 @@ public class EventService {
         return toResponse(event);
     }
 
+    @Transactional
+    public EventResponse cancelEvent(
+            Long eventId,
+            Long organizerId
+    ) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() ->
+                        new NotFoundException("Event not found")
+                );
+        if (!event.getOrganizer()
+                .getUserId()
+                .equals(organizerId)) {
+
+            throw new NotFoundException("Event not found");
+        }
+
+        if (event.getStatus() == EventStatus.CANCELLED
+                || event.getStatus() == EventStatus.FINISHED) {
+
+            throw new ConflictException(
+                    "Event cannot be cancelled in its current status"
+            );
+        }
+
+        OffsetDateTime now =
+                OffsetDateTime.now()
+                        .truncatedTo(ChronoUnit.MICROS);
+
+        if (!now.isBefore(event.getStartDate())) {
+            throw new ConflictException(
+                    "Event cannot be cancelled after it has started"
+            );
+        }
+
+        event.cancel();
+
+        eventRepository.flush();
+
+        return toResponse(event);
+    }
+
     private EventResponse toResponse(Event event) {
         return new EventResponse(
                 event.getEventId(),

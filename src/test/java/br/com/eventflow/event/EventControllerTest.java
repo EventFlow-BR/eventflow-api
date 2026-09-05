@@ -503,6 +503,87 @@ class EventControllerTest {
                 );
     }
 
+    @Test
+    void shouldCancelEventUsingAuthenticatedOrganizerId()
+            throws Exception {
+
+        EventResponse response =
+                new EventResponse(
+                        100L,
+                        10L,
+                        "Java Conference",
+                        "Description",
+                        "Petrópolis",
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
+                        100,
+                        new BigDecimal("50.00"),
+                        EventStatus.CANCELLED,
+                        null,
+                        null,
+                        null
+                );
+
+        when(eventService.cancelEvent(
+                100L,
+                10L
+        )).thenReturn(response);
+
+        mockMvc.perform(
+                        post("/api/events/100/cancel")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(
+                        jsonPath("$.status")
+                                .value("CANCELLED")
+                );
+
+        verify(eventService)
+                .cancelEvent(
+                        100L,
+                        10L
+                );
+    }
+
+    @Test
+    void shouldReturnConflictWhenEventCannotBeCancelled()
+            throws Exception {
+
+        when(eventService.cancelEvent(
+                100L,
+                10L
+        )).thenThrow(
+                new ConflictException(
+                        "Event cannot be cancelled in its current status"
+                )
+        );
+
+        mockMvc.perform(
+                        post("/api/events/100/cancel")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                )
+                .andExpect(status().isConflict())
+                .andExpect(
+                        jsonPath("$.status").value(409)
+                )
+                .andExpect(
+                        jsonPath("$.message")
+                                .value(
+                                        "Event cannot be cancelled in its current status"
+                                )
+                );
+    }
+
+
     private UsernamePasswordAuthenticationToken organizerAuthentication() {
         return new UsernamePasswordAuthenticationToken(
                 10L,
