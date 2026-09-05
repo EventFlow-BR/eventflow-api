@@ -2,10 +2,8 @@ package br.com.eventflow.event;
 
 import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
-import br.com.eventflow.shared.exception.BadRequestException;
-import br.com.eventflow.shared.exception.ForbiddenException;
-import br.com.eventflow.shared.exception.NotFoundException;
-import br.com.eventflow.shared.exception.UnauthorizedException;
+import br.com.eventflow.event.dto.UpdateEventRequest;
+import br.com.eventflow.shared.exception.*;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
@@ -21,8 +19,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -455,6 +452,280 @@ class EventServiceTest {
         );
     }
 
+    @Test
+    void shouldUpdateOwnEvent() {
+        User organizer = organizer(10L);
+
+        Event event = new Event(
+                organizer,
+                "Old Name",
+                "Old Description",
+                "Old Location",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        UpdateEventRequest request =
+                new UpdateEventRequest(
+                        "Updated Event",
+                        "Updated description",
+                        "Teresópolis",
+                        OffsetDateTime.parse(
+                                "2026-11-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-11-10T18:00:00-03:00"
+                        ),
+                        200,
+                        new BigDecimal("75.00")
+                );
+
+        EventResponse response =
+                eventService.updateEvent(
+                        100L,
+                        10L,
+                        request
+                );
+
+        assertEquals("Updated Event", response.name());
+        assertEquals(
+                "Updated description",
+                response.description()
+        );
+        assertEquals("Teresópolis", response.location());
+        assertEquals(200, response.capacity());
+        assertEquals(
+                new BigDecimal("75.00"),
+                response.price()
+        );
+    }
+
+    @Test
+    void shouldHideEventWhenAnotherOrganizerTriesToUpdate() {
+        User owner = organizer(10L);
+
+        Event event = new Event(
+                owner,
+                "Java Conference",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        assertThrows(
+                NotFoundException.class,
+                () -> eventService.updateEvent(
+                        100L,
+                        20L,
+                        validUpdateRequest()
+                )
+        );
+    }
+
+    @Test
+    void shouldPublishOwnDraftEvent() {
+        User organizer = organizer(10L);
+
+        Event event = new Event(
+                organizer,
+                "Java Conference",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        EventResponse response =
+                eventService.publishEvent(
+                        100L,
+                        10L
+                );
+
+        assertEquals(
+                EventStatus.PUBLISHED,
+                response.status()
+        );
+
+        assertNotNull(response.publishedAt());
+    }
+
+    @Test
+    void shouldRejectPublishingAlreadyPublishedEvent() {
+        User organizer = organizer(10L);
+
+        Event event = new Event(
+                organizer,
+                "Java Conference",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        event.publish(
+                OffsetDateTime.parse(
+                        "2026-09-05T12:00:00-03:00"
+                )
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        ConflictException exception =
+                assertThrows(
+                        ConflictException.class,
+                        () -> eventService.publishEvent(
+                                100L,
+                                10L
+                        )
+                );
+
+        assertEquals(
+                "Only draft events can be published",
+                exception.getMessage()
+        );
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenUpdatingUnknownEvent() {
+        when(eventRepository.findById(999L))
+                .thenReturn(Optional.empty());
+
+        NotFoundException exception =
+                assertThrows(
+                        NotFoundException.class,
+                        () -> eventService.updateEvent(
+                                999L,
+                                10L,
+                                validUpdateRequest()
+                        )
+                );
+
+        assertEquals(
+                "Event not found",
+                exception.getMessage()
+        );
+    }
+
+    @Test
+    void shouldRejectUpdateWhenStartDateIsNotBeforeEndDate() {
+        User organizer = organizer(10L);
+
+        Event event = new Event(
+                organizer,
+                "Java Conference",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        OffsetDateTime invalidDate =
+                OffsetDateTime.parse(
+                        "2026-11-10T10:00:00-03:00"
+                );
+
+        UpdateEventRequest request =
+                new UpdateEventRequest(
+                        "Updated Event",
+                        "Updated description",
+                        "Petrópolis",
+                        invalidDate,
+                        invalidDate,
+                        100,
+                        new BigDecimal("50.00")
+                );
+
+        assertThrows(
+                BadRequestException.class,
+                () -> eventService.updateEvent(
+                        100L,
+                        10L,
+                        request
+                )
+        );
+    }
+
+    @Test
+    void shouldHideEventWhenAnotherOrganizerTriesToPublish() {
+        User owner = organizer(10L);
+
+        Event event = new Event(
+                owner,
+                "Java Conference",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        NotFoundException exception =
+                assertThrows(
+                        NotFoundException.class,
+                        () -> eventService.publishEvent(
+                                100L,
+                                20L
+                        )
+                );
+
+        assertEquals(
+                "Event not found",
+                exception.getMessage()
+        );
+    }
+
     private CreateEventRequest validRequest() {
         return new CreateEventRequest(
                 "Java Conference",
@@ -514,5 +785,21 @@ class EventServiceTest {
         } catch (ReflectiveOperationException exception) {
             throw new RuntimeException(exception);
         }
+    }
+
+    private UpdateEventRequest validUpdateRequest() {
+        return new UpdateEventRequest(
+                "Updated Event",
+                "Updated description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-11-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-11-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
     }
 }

@@ -141,4 +141,27 @@ public class Event {
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;
     }
+
+    public void updateDetails(
+            String name,
+            String description,
+            String location,
+            OffsetDateTime startDate,
+            OffsetDateTime endDate,
+            Integer capacity,
+            BigDecimal price
+    ) {
+        this.name = name;
+        this.description = description;
+        this.location = location;
+        this.startDate = startDate;
+        this.endDate = endDate;
+        this.capacity = capacity;
+        this.price = price;
+    }
+
+    public void publish(OffsetDateTime publishedAt) {
+        this.status = EventStatus.PUBLISHED;
+        this.publishedAt = publishedAt;
+    }
 }

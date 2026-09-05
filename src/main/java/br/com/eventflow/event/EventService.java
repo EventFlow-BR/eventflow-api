@@ -2,16 +2,15 @@ package br.com.eventflow.event;
 
 import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
-import br.com.eventflow.shared.exception.BadRequestException;
-import br.com.eventflow.shared.exception.ForbiddenException;
-import br.com.eventflow.shared.exception.NotFoundException;
-import br.com.eventflow.shared.exception.UnauthorizedException;
+import br.com.eventflow.event.dto.UpdateEventRequest;
+import br.com.eventflow.shared.exception.*;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 @Service
@@ -112,6 +111,73 @@ public class EventService {
         if (!ownsEvent) {
             throw new NotFoundException("Event not found");
         }
+
+        return toResponse(event);
+    }
+
+    @Transactional
+    public EventResponse updateEvent(
+            Long eventId,
+            Long organizerId,
+            UpdateEventRequest request
+    ) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() ->
+                        new NotFoundException("Event not found")
+                );
+
+        if (!event.getOrganizer()
+                .getUserId()
+                .equals(organizerId)) {
+
+            throw new NotFoundException("Event not found");
+        }
+
+        if (!request.startDate()
+                .isBefore(request.endDate())) {
+
+            throw new BadRequestException(
+                    "Event start must be before end date"
+            );
+        }
+
+        event.updateDetails(
+                request.name().trim(),
+                request.description().trim(),
+                request.location().trim(),
+                request.startDate(),
+                request.endDate(),
+                request.capacity(),
+                request.price()
+        );
+
+        return toResponse(event);
+    }
+
+    @Transactional
+    public EventResponse publishEvent(
+            Long eventId,
+            Long organizerId
+    ) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() ->
+                        new NotFoundException("Event not found")
+                );
+
+        if (!event.getOrganizer()
+                .getUserId()
+                .equals(organizerId)) {
+
+            throw new NotFoundException("Event not found");
+        }
+
+        if (event.getStatus() != EventStatus.DRAFT) {
+            throw new ConflictException(
+                    "Only draft events can be published"
+            );
+        }
+
+        event.publish(OffsetDateTime.now());
 
         return toResponse(event);
     }

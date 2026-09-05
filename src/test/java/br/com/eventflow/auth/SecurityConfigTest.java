@@ -21,8 +21,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -296,6 +298,133 @@ class SecurityConfigTest {
                 .andExpect(status().is4xxClientError());
     }
 
+    @Test
+    void shouldAllowOrganizerToUpdateEvent() throws Exception {
+        String token = generateTokenFor(
+                10L,
+                UserRole.ORGANIZER
+        );
+
+        mockMvc.perform(
+                        put("/api/events/100")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                    {
+                                      "name": "Updated Event",
+                                      "description": "Updated description",
+                                      "location": "Petrópolis",
+                                      "startDate": "2026-11-10T10:00:00-03:00",
+                                      "endDate": "2026-11-10T18:00:00-03:00",
+                                      "capacity": 100,
+                                      "price": 50.00
+                                    }
+                                    """)
+                )
+                .andExpect(
+                        result -> {
+                            int status =
+                                    result.getResponse().getStatus();
+
+                            assertNotEquals(401, status);
+                            assertNotEquals(403, status);
+                        }
+                );
+    }
+
+    @Test
+    void shouldForbidParticipantFromUpdatingEvent()
+            throws Exception {
+
+        String token = generateTokenFor(
+                20L,
+                UserRole.PARTICIPANT
+        );
+
+        mockMvc.perform(
+                        put("/api/events/100")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                    {
+                                      "name": "Updated Event",
+                                      "description": "Updated description",
+                                      "location": "Petrópolis",
+                                      "startDate": "2026-11-10T10:00:00-03:00",
+                                      "endDate": "2026-11-10T18:00:00-03:00",
+                                      "capacity": 100,
+                                      "price": 50.00
+                                    }
+                                    """)
+                )
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldAllowOrganizerToPublishEvent()
+            throws Exception {
+
+        String token = generateTokenFor(
+                10L,
+                UserRole.ORGANIZER
+        );
+
+        mockMvc.perform(
+                        post("/api/events/100/publish")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                )
+                .andExpect(
+                        result -> {
+                            int status =
+                                    result.getResponse().getStatus();
+
+                            assertNotEquals(401, status);
+                            assertNotEquals(403, status);
+                        }
+                );
+    }
+
+    @Test
+    void shouldForbidParticipantFromPublishingEvent()
+            throws Exception {
+
+        String token = generateTokenFor(
+                20L,
+                UserRole.PARTICIPANT
+        );
+
+        mockMvc.perform(
+                        post("/api/events/100/publish")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                )
+                .andExpect(status().isForbidden());
+    }
+
+
     @TestConfiguration
     static class TestEndpointsConfiguration {
 
@@ -343,5 +472,21 @@ class SecurityConfigTest {
         } catch (ReflectiveOperationException exception) {
             throw new RuntimeException(exception);
         }
+    }
+
+    private String generateTokenFor(
+            Long userId,
+            UserRole role
+    ) {
+        User user = new User(
+                "Test User",
+                "test@example.com",
+                "encoded-password",
+                role
+        );
+
+        setUserIdForTest(user, userId);
+
+        return jwtService.generateToken(user);
     }
 }
