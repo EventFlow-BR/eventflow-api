@@ -4,6 +4,7 @@ import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
 import br.com.eventflow.shared.exception.BadRequestException;
 import br.com.eventflow.shared.exception.ForbiddenException;
+import br.com.eventflow.shared.exception.NotFoundException;
 import br.com.eventflow.shared.exception.UnauthorizedException;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
@@ -17,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -193,6 +195,266 @@ class EventServiceTest {
                 .save(any());
     }
 
+    @Test
+    void shouldListOnlyPublishedEventsForParticipant() {
+        User organizer = organizer(10L);
+
+        Event publishedEvent = new Event(
+                organizer,
+                "Published Event",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        setEventStatusForTest(
+                publishedEvent,
+                EventStatus.PUBLISHED
+        );
+
+        when(eventRepository.findAllByStatus(
+                EventStatus.PUBLISHED
+        )).thenReturn(List.of(publishedEvent));
+
+        List<EventResponse> response =
+                eventService.listVisibleEvents(
+                        20L,
+                        UserRole.PARTICIPANT
+                );
+
+        assertEquals(1, response.size());
+        assertEquals(
+                "Published Event",
+                response.getFirst().name()
+        );
+
+        verify(eventRepository)
+                .findAllByStatus(EventStatus.PUBLISHED);
+
+        verify(eventRepository, never())
+                .findAllByOrganizer_UserId(anyLong());
+    }
+
+    @Test
+    void shouldListOwnEventsForOrganizer() {
+        User organizer = organizer(10L);
+
+        Event ownEvent = new Event(
+                organizer,
+                "Organizer Draft",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findAllByOrganizer_UserId(10L))
+                .thenReturn(List.of(ownEvent));
+
+        List<EventResponse> response =
+                eventService.listVisibleEvents(
+                        10L,
+                        UserRole.ORGANIZER
+                );
+
+        assertEquals(1, response.size());
+        assertEquals(
+                "Organizer Draft",
+                response.getFirst().name()
+        );
+
+        verify(eventRepository)
+                .findAllByOrganizer_UserId(10L);
+
+        verify(eventRepository, never())
+                .findAllByStatus(any());
+    }
+
+    @Test
+    void shouldAllowParticipantToViewPublishedEvent() {
+        User organizer = organizer(10L);
+
+        Event event = new Event(
+                organizer,
+                "Published Event",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        setEventStatusForTest(
+                event,
+                EventStatus.PUBLISHED
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        EventResponse response =
+                eventService.getVisibleEvent(
+                        100L,
+                        20L,
+                        UserRole.PARTICIPANT
+                );
+
+        assertEquals(
+                "Published Event",
+                response.name()
+        );
+    }
+
+    @Test
+    void shouldHidePrivateEventFromAnotherOrganizer() {
+        User owner = organizer(10L);
+
+        Event event = new Event(
+                owner,
+                "Private Draft",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        NotFoundException exception =
+                assertThrows(
+                        NotFoundException.class,
+                        () -> eventService.getVisibleEvent(
+                                100L,
+                                20L,
+                                UserRole.ORGANIZER
+                        )
+                );
+
+        assertEquals(
+                "Event not found",
+                exception.getMessage()
+        );
+    }
+
+    @Test
+    void shouldAllowOrganizerToViewOwnDraftEvent() {
+        User organizer = organizer(10L);
+
+        Event event = new Event(
+                organizer,
+                "Private Draft",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        EventResponse response =
+                eventService.getVisibleEvent(
+                        100L,
+                        10L,
+                        UserRole.ORGANIZER
+                );
+
+        assertEquals(
+                "Private Draft",
+                response.name()
+        );
+    }
+
+    @Test
+    void shouldHideDraftEventFromParticipant() {
+        User organizer = organizer(10L);
+
+        Event event = new Event(
+                organizer,
+                "Private Draft",
+                "Description",
+                "Petrópolis",
+                OffsetDateTime.parse(
+                        "2026-10-10T10:00:00-03:00"
+                ),
+                OffsetDateTime.parse(
+                        "2026-10-10T18:00:00-03:00"
+                ),
+                100,
+                new BigDecimal("50.00")
+        );
+
+        when(eventRepository.findById(100L))
+                .thenReturn(Optional.of(event));
+
+        NotFoundException exception =
+                assertThrows(
+                        NotFoundException.class,
+                        () -> eventService.getVisibleEvent(
+                                100L,
+                                20L,
+                                UserRole.PARTICIPANT
+                        )
+                );
+
+        assertEquals(
+                "Event not found",
+                exception.getMessage()
+        );
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenEventDoesNotExist() {
+        when(eventRepository.findById(999L))
+                .thenReturn(Optional.empty());
+
+        NotFoundException exception =
+                assertThrows(
+                        NotFoundException.class,
+                        () -> eventService.getVisibleEvent(
+                                999L,
+                                20L,
+                                UserRole.PARTICIPANT
+                        )
+                );
+
+        assertEquals(
+                "Event not found",
+                exception.getMessage()
+        );
+    }
+
     private CreateEventRequest validRequest() {
         return new CreateEventRequest(
                 "Java Conference",
@@ -232,6 +494,22 @@ class EventServiceTest {
 
             field.setAccessible(true);
             field.set(user, userId);
+
+        } catch (ReflectiveOperationException exception) {
+            throw new RuntimeException(exception);
+        }
+    }
+
+    private void setEventStatusForTest(
+            Event event,
+            EventStatus status
+    ) {
+        try {
+            var field =
+                    Event.class.getDeclaredField("status");
+
+            field.setAccessible(true);
+            field.set(event, status);
 
         } catch (ReflectiveOperationException exception) {
             throw new RuntimeException(exception);

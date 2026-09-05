@@ -4,6 +4,8 @@ import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
 import br.com.eventflow.shared.exception.BadRequestException;
 import br.com.eventflow.shared.exception.GlobalExceptionHandler;
+import br.com.eventflow.shared.exception.NotFoundException;
+import br.com.eventflow.user.UserRole;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -25,6 +27,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 @WebMvcTest(controllers = EventController.class)
 @Import(GlobalExceptionHandler.class)
@@ -181,6 +184,134 @@ class EventControllerTest {
                         .value("Event start must be before end date"));
     }
 
+    @Test
+    void shouldListVisibleEventsForAuthenticatedUser()
+            throws Exception {
+
+        EventResponse response =
+                new EventResponse(
+                        100L,
+                        10L,
+                        "Published Event",
+                        "Description",
+                        "Petrópolis",
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
+                        100,
+                        new BigDecimal("50.00"),
+                        EventStatus.PUBLISHED,
+                        OffsetDateTime.parse(
+                                "2026-09-10T10:00:00-03:00"
+                        ),
+                        null,
+                        null
+                );
+
+        when(eventService.listVisibleEvents(
+                20L,
+                UserRole.PARTICIPANT
+        )).thenReturn(List.of(response));
+
+        mockMvc.perform(
+                        get("/api/events")
+                                .principal(
+                                        participantAuthentication()
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(100))
+                .andExpect(jsonPath("$[0].name")
+                        .value("Published Event"))
+                .andExpect(jsonPath("$[0].status")
+                        .value("PUBLISHED"));
+
+        verify(eventService)
+                .listVisibleEvents(
+                        20L,
+                        UserRole.PARTICIPANT
+                );
+    }
+
+    @Test
+    void shouldReturnVisibleEventDetails()
+            throws Exception {
+
+        EventResponse response =
+                new EventResponse(
+                        100L,
+                        10L,
+                        "Published Event",
+                        "Description",
+                        "Petrópolis",
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
+                        100,
+                        new BigDecimal("50.00"),
+                        EventStatus.PUBLISHED,
+                        null,
+                        null,
+                        null
+                );
+
+        when(eventService.getVisibleEvent(
+                100L,
+                20L,
+                UserRole.PARTICIPANT
+        )).thenReturn(response);
+
+        mockMvc.perform(
+                        get("/api/events/100")
+                                .principal(
+                                        participantAuthentication()
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(100))
+                .andExpect(jsonPath("$.name")
+                        .value("Published Event"))
+                .andExpect(jsonPath("$.status")
+                        .value("PUBLISHED"));
+
+        verify(eventService)
+                .getVisibleEvent(
+                        100L,
+                        20L,
+                        UserRole.PARTICIPANT
+                );
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenEventIsNotVisible()
+            throws Exception {
+
+        when(eventService.getVisibleEvent(
+                100L,
+                20L,
+                UserRole.PARTICIPANT
+        )).thenThrow(
+                new NotFoundException("Event not found")
+        );
+
+        mockMvc.perform(
+                        get("/api/events/100")
+                                .principal(
+                                        participantAuthentication()
+                                )
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message")
+                        .value("Event not found"));
+    }
+
     private UsernamePasswordAuthenticationToken organizerAuthentication() {
         return new UsernamePasswordAuthenticationToken(
                 10L,
@@ -205,5 +336,17 @@ class EventControllerTest {
                   "price": 50.00
                 }
                 """;
+    }
+
+    private UsernamePasswordAuthenticationToken participantAuthentication() {
+        return new UsernamePasswordAuthenticationToken(
+                20L,
+                null,
+                List.of(
+                        new SimpleGrantedAuthority(
+                                "ROLE_PARTICIPANT"
+                        )
+                )
+        );
     }
 }
