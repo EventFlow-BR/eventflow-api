@@ -507,6 +507,8 @@ class EventServiceTest {
                 new BigDecimal("75.00"),
                 response.price()
         );
+
+        verify(eventRepository).flush();
     }
 
     @Test

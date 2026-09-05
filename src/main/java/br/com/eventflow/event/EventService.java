@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 @Service
@@ -151,6 +152,8 @@ public class EventService {
                 request.price()
         );
 
+        eventRepository.flush();
+
         return toResponse(event);
     }
 
@@ -177,7 +180,12 @@ public class EventService {
             );
         }
 
-        event.publish(OffsetDateTime.now());
+        event.publish(
+                OffsetDateTime.now()
+                        .truncatedTo(ChronoUnit.MICROS)
+        );
+
+        eventRepository.flush();
 
         return toResponse(event);
     }

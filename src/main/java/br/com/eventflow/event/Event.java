@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 
 @Entity
 @Table(name = "events")
@@ -79,7 +80,9 @@ public class Event {
 
     @PrePersist
     void prePersist() {
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now =
+                OffsetDateTime.now()
+                        .truncatedTo(ChronoUnit.MICROS);
 
         this.createdAt = now;
         this.updatedAt = now;
@@ -87,7 +90,9 @@ public class Event {
 
     @PreUpdate
     void preUpdate() {
-        this.updatedAt = OffsetDateTime.now();
+        this.updatedAt =
+                OffsetDateTime.now()
+                        .truncatedTo(ChronoUnit.MICROS);
     }
 
     public Long getEventId() {
