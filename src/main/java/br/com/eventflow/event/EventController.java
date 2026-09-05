@@ -2,6 +2,7 @@ package br.com.eventflow.event;
 
 import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
+import br.com.eventflow.event.dto.UpdateEventRequest;
 import br.com.eventflow.user.UserRole;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -80,6 +81,42 @@ public class EventController {
                         eventId,
                         userId,
                         role
+                );
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/{eventId}")
+    public ResponseEntity<EventResponse> updateEvent(
+            @PathVariable Long eventId,
+            @Valid @RequestBody UpdateEventRequest request,
+            Authentication authentication
+    ) {
+        Long organizerId =
+                (Long) authentication.getPrincipal();
+
+        EventResponse response =
+                eventService.updateEvent(
+                        eventId,
+                        organizerId,
+                        request
+                );
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{eventId}/publish")
+    public ResponseEntity<EventResponse> publishEvent(
+            @PathVariable Long eventId,
+            Authentication authentication
+    ) {
+        Long organizerId =
+                (Long) authentication.getPrincipal();
+
+        EventResponse response =
+                eventService.publishEvent(
+                        eventId,
+                        organizerId
                 );
 
         return ResponseEntity.ok(response);
