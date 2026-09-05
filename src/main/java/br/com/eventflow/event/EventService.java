@@ -4,12 +4,15 @@ import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
 import br.com.eventflow.shared.exception.BadRequestException;
 import br.com.eventflow.shared.exception.ForbiddenException;
+import br.com.eventflow.shared.exception.NotFoundException;
 import br.com.eventflow.shared.exception.UnauthorizedException;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 @Service
 public class EventService {
@@ -63,6 +66,54 @@ public class EventService {
         Event savedEvent =  eventRepository.save(event);
 
         return toResponse(savedEvent);
+    }
+
+    @Transactional(readOnly = true)
+    public List<EventResponse> listVisibleEvents(
+            Long userId,
+            UserRole role
+    ) {
+        List<Event> events;
+
+        if (role == UserRole.ORGANIZER) {
+            events = eventRepository
+                    .findAllByOrganizer_UserId(userId);
+        } else {
+            events = eventRepository
+                    .findAllByStatus(EventStatus.PUBLISHED);
+        }
+
+        return events.stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public EventResponse getVisibleEvent(
+            Long eventId,
+            Long userId,
+            UserRole role
+    ) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() ->
+                        new NotFoundException("Event not found")
+                );
+
+        if (event.getStatus() == EventStatus.PUBLISHED) {
+            return toResponse(event);
+        }
+
+        boolean ownsEvent =
+                role == UserRole.ORGANIZER
+                        && event.getOrganizer()
+                        .getUserId()
+                        .equals(userId);
+
+        if (!ownsEvent) {
+            throw new NotFoundException("Event not found");
+        }
+
+        return toResponse(event);
     }
 
     private EventResponse toResponse(Event event) {
