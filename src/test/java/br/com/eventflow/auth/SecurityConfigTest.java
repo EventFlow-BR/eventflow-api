@@ -424,6 +424,58 @@ class SecurityConfigTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    void shouldAllowOrganizerToCancelEvent()
+            throws Exception {
+
+        String token = generateTokenFor(
+                10L,
+                UserRole.ORGANIZER
+        );
+
+        mockMvc.perform(
+                        post("/api/events/100/cancel")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                )
+                .andExpect(
+                        result -> {
+                            int status =
+                                    result.getResponse().getStatus();
+
+                            assertNotEquals(401, status);
+                            assertNotEquals(403, status);
+                        }
+                );
+    }
+
+    @Test
+    void shouldForbidParticipantFromCancellingEvent()
+            throws Exception {
+
+        String token = generateTokenFor(
+                20L,
+                UserRole.PARTICIPANT
+        );
+
+        mockMvc.perform(
+                        post("/api/events/100/cancel")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                )
+                .andExpect(status().isForbidden());
+    }
+
 
     @TestConfiguration
     static class TestEndpointsConfiguration {

@@ -121,4 +121,21 @@ public class EventController {
 
         return ResponseEntity.ok(response);
     }
+
+    @PostMapping("/{eventId}/cancel")
+    public ResponseEntity<EventResponse> cancelEvent(
+            @PathVariable Long eventId,
+            Authentication authentication
+    ) {
+        Long organizerId =
+                (Long) authentication.getPrincipal();
+
+        EventResponse response =
+                eventService.cancelEvent(
+                        eventId,
+                        organizerId
+                );
+
+        return ResponseEntity.ok(response);
+    }
 }

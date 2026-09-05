@@ -45,6 +45,11 @@ public class SecurityConfig {
                         ).permitAll()
                         .requestMatchers(
                                 HttpMethod.POST,
+                                "/api/events/*/cancel"
+                        ).hasRole("ORGANIZER")
+
+                        .requestMatchers(
+                                HttpMethod.POST,
                                 "/api/events"
                         ).hasRole("ORGANIZER")
 
