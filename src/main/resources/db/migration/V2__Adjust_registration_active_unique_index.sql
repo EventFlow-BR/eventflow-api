@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS uq_registrations_active_participant_event;
