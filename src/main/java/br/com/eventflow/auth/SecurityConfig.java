@@ -62,6 +62,11 @@ public class SecurityConfig {
                                 HttpMethod.POST,
                                 "/api/events/*/publish"
                         ).hasRole("ORGANIZER")
+
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/events/*/registrations"
+                        ).hasRole("PARTICIPANT")
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(
