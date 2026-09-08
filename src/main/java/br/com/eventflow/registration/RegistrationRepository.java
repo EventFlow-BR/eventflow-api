@@ -1,7 +1,9 @@
 package br.com.eventflow.registration;
 
 import br.com.eventflow.registration.enums.RegistrationStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -52,5 +54,15 @@ public interface RegistrationRepository
             @Param("pendingStatus")
             RegistrationStatus pendingStatus,
             @Param("now") OffsetDateTime now
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        select r
+        from Registration r
+        where r.registrationId = :registrationId
+        """)
+    Optional<Registration> findByIdForUpdate(
+            @Param("registrationId") Long registrationId
     );
 }

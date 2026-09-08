@@ -1,6 +1,7 @@
 package br.com.eventflow.auth;
 
 import br.com.eventflow.event.EventService;
+import br.com.eventflow.payment.PaymentService;
 import br.com.eventflow.registration.RegistrationService;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRole;
@@ -53,6 +54,9 @@ class SecurityConfigTest {
 
     @MockitoBean
     private RegistrationService registrationService;
+
+    @MockitoBean
+    private PaymentService paymentService;
 
 
     @Test
@@ -531,6 +535,77 @@ class SecurityConfigTest {
                                 .with(csrf())
                 )
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldAllowParticipantToProcessPayment()
+            throws Exception {
+
+        String token = generateTokenFor(
+                20L,
+                UserRole.PARTICIPANT
+        );
+
+        mockMvc.perform(
+                        post("/api/registrations/100/payment")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                )
+                .andExpect(
+                        result -> {
+                            int status =
+                                    result.getResponse()
+                                            .getStatus();
+
+                            assertNotEquals(
+                                    401,
+                                    status
+                            );
+
+                            assertNotEquals(
+                                    403,
+                                    status
+                            );
+                        }
+                );
+    }
+
+    @Test
+    void shouldForbidOrganizerFromProcessingPayment()
+            throws Exception {
+
+        String token = generateTokenFor(
+                10L,
+                UserRole.ORGANIZER
+        );
+
+        mockMvc.perform(
+                        post("/api/registrations/100/payment")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                                .with(csrf())
+                )
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedPayment()
+            throws Exception {
+
+        mockMvc.perform(
+                        post("/api/registrations/100/payment")
+                                .with(csrf())
+                )
+                .andExpect(status().is4xxClientError());
     }
 
 
