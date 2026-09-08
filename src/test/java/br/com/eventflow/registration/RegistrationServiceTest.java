@@ -20,7 +20,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -63,13 +62,13 @@ class RegistrationServiceTest {
         when(userRepository.findById(20L))
                 .thenReturn(Optional.of(participant));
 
-        when(registrationRepository
-                .findFirstByParticipant_UserIdAndEvent_EventIdAndStatusIn(
-                        eq(20L),
-                        eq(100L),
-                        anyList()
-                ))
-                .thenReturn(Optional.empty());
+        when(registrationRepository.findActiveRegistration(
+                eq(20L),
+                eq(100L),
+                eq(RegistrationStatus.CONFIRMED),
+                eq(RegistrationStatus.PENDING),
+                any(OffsetDateTime.class)
+        )).thenReturn(Optional.empty());
 
         when(registrationRepository.countOccupyingCapacity(
                 eq(100L),
@@ -83,11 +82,17 @@ class RegistrationServiceTest {
                         invocation.getArgument(0)
                 );
 
+        OffsetDateTime before =
+                OffsetDateTime.now();
+
         RegistrationResponse response =
                 registrationService.createReservation(
                         100L,
                         20L
                 );
+
+        OffsetDateTime after =
+                OffsetDateTime.now();
 
         assertEquals(
                 RegistrationStatus.PENDING,
@@ -97,6 +102,20 @@ class RegistrationServiceTest {
         assertEquals(100L, response.eventId());
         assertEquals(20L, response.participantId());
         assertNotNull(response.reservationExpiresAt());
+
+        assertFalse(
+                response.reservationExpiresAt()
+                        .isBefore(
+                                before.plusMinutes(15)
+                        )
+        );
+
+        assertFalse(
+                response.reservationExpiresAt()
+                        .isAfter(
+                                after.plusMinutes(15)
+                        )
+        );
 
         verify(eventRepository)
                 .findByIdForUpdate(100L);
@@ -230,13 +249,13 @@ class RegistrationServiceTest {
         when(userRepository.findById(20L))
                 .thenReturn(Optional.of(participant));
 
-        when(registrationRepository
-                .findFirstByParticipant_UserIdAndEvent_EventIdAndStatusIn(
-                        eq(20L),
-                        eq(100L),
-                        anyList()
-                ))
-                .thenReturn(Optional.of(existing));
+        when(registrationRepository.findActiveRegistration(
+                eq(20L),
+                eq(100L),
+                eq(RegistrationStatus.CONFIRMED),
+                eq(RegistrationStatus.PENDING),
+                any(OffsetDateTime.class)
+        )).thenReturn(Optional.of(existing));
 
         assertThrows(
                 ConflictException.class,
@@ -251,16 +270,9 @@ class RegistrationServiceTest {
     }
 
     @Test
-    void shouldReplaceExpiredPendingReservation() {
+    void shouldAllowNewReservationWhenPreviousPendingReservationExpired() {
         User participant = participant(20L);
         Event event = publishedFutureEvent(10L, 100);
-
-        Registration expired =
-                new Registration(
-                        event,
-                        participant,
-                        OffsetDateTime.now().minusMinutes(1)
-                );
 
         when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
@@ -268,13 +280,13 @@ class RegistrationServiceTest {
         when(userRepository.findById(20L))
                 .thenReturn(Optional.of(participant));
 
-        when(registrationRepository
-                .findFirstByParticipant_UserIdAndEvent_EventIdAndStatusIn(
-                        eq(20L),
-                        eq(100L),
-                        anyList()
-                ))
-                .thenReturn(Optional.of(expired));
+        when(registrationRepository.findActiveRegistration(
+                eq(20L),
+                eq(100L),
+                eq(RegistrationStatus.CONFIRMED),
+                eq(RegistrationStatus.PENDING),
+                any(OffsetDateTime.class)
+        )).thenReturn(Optional.empty());
 
         when(registrationRepository.countOccupyingCapacity(
                 eq(100L),
@@ -295,16 +307,13 @@ class RegistrationServiceTest {
                 );
 
         assertEquals(
-                RegistrationStatus.CANCELLED,
-                expired.getStatus()
-        );
-
-        assertEquals(
                 RegistrationStatus.PENDING,
                 response.status()
         );
 
-        verify(registrationRepository).flush();
+        verify(registrationRepository, never())
+                .flush();
+
         verify(registrationRepository)
                 .save(any(Registration.class));
     }
@@ -320,13 +329,13 @@ class RegistrationServiceTest {
         when(userRepository.findById(20L))
                 .thenReturn(Optional.of(participant));
 
-        when(registrationRepository
-                .findFirstByParticipant_UserIdAndEvent_EventIdAndStatusIn(
-                        eq(20L),
-                        eq(100L),
-                        anyList()
-                ))
-                .thenReturn(Optional.empty());
+        when(registrationRepository.findActiveRegistration(
+                eq(20L),
+                eq(100L),
+                eq(RegistrationStatus.CONFIRMED),
+                eq(RegistrationStatus.PENDING),
+                any(OffsetDateTime.class)
+        )).thenReturn(Optional.empty());
 
         when(registrationRepository.countOccupyingCapacity(
                 eq(100L),
@@ -371,13 +380,13 @@ class RegistrationServiceTest {
         when(userRepository.findById(20L))
                 .thenReturn(Optional.of(participant));
 
-        when(registrationRepository
-                .findFirstByParticipant_UserIdAndEvent_EventIdAndStatusIn(
-                        eq(20L),
-                        eq(100L),
-                        anyList()
-                ))
-                .thenReturn(Optional.of(existing));
+        when(registrationRepository.findActiveRegistration(
+                eq(20L),
+                eq(100L),
+                eq(RegistrationStatus.CONFIRMED),
+                eq(RegistrationStatus.PENDING),
+                any(OffsetDateTime.class)
+        )).thenReturn(Optional.of(existing));
 
         ConflictException exception =
                 assertThrows(
@@ -516,7 +525,9 @@ class RegistrationServiceTest {
                 "Description",
                 "Petrópolis",
                 OffsetDateTime.now().plusDays(7),
-                OffsetDateTime.now().plusDays(7).plusHours(8),
+                OffsetDateTime.now()
+                        .plusDays(7)
+                        .plusHours(8),
                 capacity,
                 new BigDecimal("50.00")
         );

@@ -69,9 +69,6 @@ public class Registration {
                         .truncatedTo(ChronoUnit.MICROS);
     }
 
-    public void cancel() {
-        this.status = RegistrationStatus.CANCELLED;
-    }
 
     public Long getRegistrationId() {
         return registrationId;

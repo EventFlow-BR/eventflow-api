@@ -18,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
 
 @Service
 public class RegistrationService {
@@ -79,7 +78,7 @@ public class RegistrationService {
             );
         }
 
-        handleExistingRegistration(
+        validateNoActiveRegistration(
                 participantId,
                 eventId,
                 now
@@ -139,43 +138,27 @@ public class RegistrationService {
         }
     }
 
-    private void handleExistingRegistration(
+    private void validateNoActiveRegistration(
             Long participantId,
             Long eventId,
             OffsetDateTime now
     ) {
-        registrationRepository
-                .findFirstByParticipant_UserIdAndEvent_EventIdAndStatusIn(
-                        participantId,
-                        eventId,
-                        List.of(
+        boolean hasActiveRegistration =
+                registrationRepository
+                        .findActiveRegistration(
+                                participantId,
+                                eventId,
+                                RegistrationStatus.CONFIRMED,
                                 RegistrationStatus.PENDING,
-                                RegistrationStatus.CONFIRMED
+                                now
                         )
-                )
-                .ifPresent(registration -> {
+                        .isPresent();
 
-                    if (registration.getStatus()
-                            == RegistrationStatus.CONFIRMED) {
-
-                        throw new ConflictException(
-                                "Participant already has an active registration"
-                        );
-                    }
-
-                    if (registration
-                            .getReservationExpiresAt()
-                            .isAfter(now)) {
-
-                        throw new ConflictException(
-                                "Participant already has an active registration"
-                        );
-                    }
-
-                    registration.cancel();
-
-                    registrationRepository.flush();
-                });
+        if (hasActiveRegistration) {
+            throw new ConflictException(
+                    "Participant already has an active registration"
+            );
+        }
     }
 
     private RegistrationResponse toResponse(

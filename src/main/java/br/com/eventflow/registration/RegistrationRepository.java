@@ -12,11 +12,25 @@ import java.util.Optional;
 public interface RegistrationRepository
         extends JpaRepository<Registration, Long> {
 
-    Optional<Registration>
-    findFirstByParticipant_UserIdAndEvent_EventIdAndStatusIn(
-            Long participantId,
-            Long eventId,
-            List<RegistrationStatus> statuses
+    @Query("""
+        select r
+        from Registration r
+        where r.participant.userId = :participantId
+          and r.event.eventId = :eventId
+          and (
+                r.status = :confirmedStatus
+                or (
+                    r.status = :pendingStatus
+                    and r.reservationExpiresAt > :now
+                )
+              )
+        """)
+    Optional<Registration> findActiveRegistration(
+            @Param("participantId") Long participantId,
+            @Param("eventId") Long eventId,
+            @Param("confirmedStatus") RegistrationStatus confirmedStatus,
+            @Param("pendingStatus") RegistrationStatus pendingStatus,
+            @Param("now") OffsetDateTime now
     );
 
     @Query("""
