@@ -97,4 +97,8 @@ public class Registration {
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;
     }
+
+    public void confirm() {
+        this.status = RegistrationStatus.CONFIRMED;
+    }
 }
