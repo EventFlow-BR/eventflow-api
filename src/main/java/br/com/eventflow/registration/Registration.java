@@ -103,6 +103,12 @@ public class Registration {
     }
 
     public void expire() {
+        if (this.status != RegistrationStatus.PENDING) {
+            throw new IllegalStateException(
+                    "Only pending registrations can expire"
+            );
+        }
+
         this.status = RegistrationStatus.EXPIRED;
     }
 }

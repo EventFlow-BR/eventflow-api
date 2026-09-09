@@ -66,12 +66,13 @@ public interface RegistrationRepository
             @Param("registrationId") Long registrationId
     );
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
-        select r
-        from Registration r
-        where r.status = :status
-          and r.reservationExpiresAt <= :now
-        """)
+    select r
+    from Registration r
+    where r.status = :status
+      and r.reservationExpiresAt <= :now
+    """)
     List<Registration> findExpiredPendingRegistrations(
             @Param("status") RegistrationStatus status,
             @Param("now") OffsetDateTime now
