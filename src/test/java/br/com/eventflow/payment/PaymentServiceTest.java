@@ -361,6 +361,51 @@ class PaymentServiceTest {
         );
     }
 
+    @Test
+    void shouldRejectExpiredRegistration() {
+        User participant = participant(20L);
+
+        Event event =
+                publishedEventWithPrice(
+                        10L,
+                        new BigDecimal("50.00")
+                );
+
+        Registration registration =
+                pendingRegistration(
+                        100L,
+                        event,
+                        participant,
+                        OffsetDateTime.now()
+                                .plusMinutes(10)
+                );
+
+        setRegistrationStatus(
+                registration,
+                RegistrationStatus.EXPIRED
+        );
+
+        when(registrationRepository
+                .findByIdForUpdate(100L))
+                .thenReturn(Optional.of(registration));
+
+        ConflictException exception =
+                assertThrows(
+                        ConflictException.class,
+                        () -> paymentService.processPayment(
+                                100L,
+                                20L
+                        )
+                );
+
+        assertEquals(
+                "Registration cannot be paid in its current status",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(paymentRepository);
+    }
+
     private User participant(Long id) {
         User user = new User(
                 "Participant",
