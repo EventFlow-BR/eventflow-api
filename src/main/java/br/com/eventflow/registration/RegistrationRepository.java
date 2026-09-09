@@ -65,4 +65,15 @@ public interface RegistrationRepository
     Optional<Registration> findByIdForUpdate(
             @Param("registrationId") Long registrationId
     );
+
+    @Query("""
+        select r
+        from Registration r
+        where r.status = :status
+          and r.reservationExpiresAt <= :now
+        """)
+    List<Registration> findExpiredPendingRegistrations(
+            @Param("status") RegistrationStatus status,
+            @Param("now") OffsetDateTime now
+    );
 }

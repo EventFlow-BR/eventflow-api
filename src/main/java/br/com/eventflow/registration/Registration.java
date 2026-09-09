@@ -101,4 +101,8 @@ public class Registration {
     public void confirm() {
         this.status = RegistrationStatus.CONFIRMED;
     }
+
+    public void expire() {
+        this.status = RegistrationStatus.EXPIRED;
+    }
 }
