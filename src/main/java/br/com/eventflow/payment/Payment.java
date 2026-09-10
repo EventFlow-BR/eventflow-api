@@ -94,4 +94,14 @@ public class Payment {
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;
     }
+
+    public void refund() {
+        if (this.status != PaymentStatus.APPROVED) {
+            throw new IllegalStateException(
+                    "Only approved payments can be refunded"
+            );
+        }
+
+        this.status = PaymentStatus.REFUNDED;
+    }
 }

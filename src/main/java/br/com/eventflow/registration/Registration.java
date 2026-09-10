@@ -111,4 +111,15 @@ public class Registration {
 
         this.status = RegistrationStatus.EXPIRED;
     }
+
+    public void cancel() {
+        if (this.status != RegistrationStatus.PENDING
+                && this.status != RegistrationStatus.CONFIRMED) {
+            throw new IllegalStateException(
+                    "Only pending or confirmed registrations can be cancelled"
+            );
+        }
+
+        this.status = RegistrationStatus.CANCELLED;
+    }
 }
