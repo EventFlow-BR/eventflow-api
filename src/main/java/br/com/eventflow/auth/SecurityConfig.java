@@ -72,6 +72,11 @@ public class SecurityConfig {
                                 HttpMethod.POST,
                                 "/api/registrations/*/payment"
                         ).hasRole("PARTICIPANT")
+
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/registrations/*/cancel"
+                        ).hasRole("PARTICIPANT")
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(
