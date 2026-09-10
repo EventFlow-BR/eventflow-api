@@ -20,7 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest
 @ActiveProfiles("local")
@@ -42,7 +42,7 @@ class RegistrationCancellationExpirationConcurrencyIntegrationTest {
     private UserRepository userRepository;
 
     @Test
-    void shouldKeepConsistentStateWhenCancellationAndExpirationRunConcurrently()
+    void shouldExpireRegistrationWhenCancellationAndExpirationRunConcurrently()
             throws Exception {
 
         String suffix = UUID.randomUUID().toString();
@@ -91,7 +91,8 @@ class RegistrationCancellationExpirationConcurrencyIntegrationTest {
                 new Registration(
                         event,
                         participant,
-                        OffsetDateTime.now().minusMinutes(1)
+                        OffsetDateTime.now()
+                                .minusMinutes(1)
                 );
 
         registration =
@@ -157,37 +158,19 @@ class RegistrationCancellationExpirationConcurrencyIntegrationTest {
                             .findById(registrationId)
                             .orElseThrow();
 
-            assertTrue(
+            assertEquals(
+                    RegistrationStatus.EXPIRED,
                     persistedRegistration.getStatus()
-                            == RegistrationStatus.CANCELLED
-                            || persistedRegistration.getStatus()
-                            == RegistrationStatus.EXPIRED
             );
 
-            if (persistedRegistration.getStatus()
-                    == RegistrationStatus.CANCELLED) {
+            assertEquals(
+                    "CANCELLATION_CONFLICT",
+                    cancellationOutcome
+            );
 
-                assertTrue(
-                        cancellationOutcome.equals(
-                                "CANCELLATION_SUCCESS"
-                        )
-                );
-            }
-
-            if (persistedRegistration.getStatus()
-                    == RegistrationStatus.EXPIRED) {
-
-                assertTrue(
-                        cancellationOutcome.equals(
-                                "CANCELLATION_CONFLICT"
-                        )
-                );
-            }
-
-            assertTrue(
-                    expirationOutcome.equals(
-                            "EXPIRATION_COMPLETED"
-                    )
+            assertEquals(
+                    "EXPIRATION_COMPLETED",
+                    expirationOutcome
             );
 
         } finally {
