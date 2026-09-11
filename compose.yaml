@@ -20,5 +20,18 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: eventflow-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: eventflow
+      RABBITMQ_DEFAULT_PASS: eventflow
+    volumes:
+      - eventflow-rabbitmq-data:/var/lib/rabbitmq
+
 volumes:
   eventflow-postgres-data:
+  eventflow-rabbitmq-data:
