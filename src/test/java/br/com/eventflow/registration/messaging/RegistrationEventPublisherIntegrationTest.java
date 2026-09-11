@@ -55,6 +55,8 @@ class RegistrationEventPublisherIntegrationTest {
                         5_000
                 );
 
+        assertNotNull(receivedMessage);
+
         String payload =
                 new String(
                         receivedMessage.getBody(),
