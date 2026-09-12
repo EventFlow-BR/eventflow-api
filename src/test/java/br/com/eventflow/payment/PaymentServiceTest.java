@@ -6,6 +6,7 @@ import br.com.eventflow.payment.enums.PaymentStatus;
 import br.com.eventflow.registration.Registration;
 import br.com.eventflow.registration.RegistrationRepository;
 import br.com.eventflow.registration.enums.RegistrationStatus;
+import br.com.eventflow.registration.event.RegistrationConfirmedEvent;
 import br.com.eventflow.shared.exception.ConflictException;
 import br.com.eventflow.shared.exception.NotFoundException;
 import br.com.eventflow.user.User;
@@ -13,8 +14,10 @@ import br.com.eventflow.user.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -33,6 +36,9 @@ class PaymentServiceTest {
     @Mock
     private RegistrationRepository registrationRepository;
 
+    @Mock
+    private ApplicationEventPublisher applicationEventPublisher;
+
     private PaymentService paymentService;
 
     @BeforeEach
@@ -40,7 +46,8 @@ class PaymentServiceTest {
         paymentService =
                 new PaymentService(
                         paymentRepository,
-                        registrationRepository
+                        registrationRepository,
+                        applicationEventPublisher
                 );
     }
 
@@ -84,6 +91,38 @@ class PaymentServiceTest {
                         20L
                 );
 
+        ArgumentCaptor<RegistrationConfirmedEvent> eventCaptor =
+                ArgumentCaptor.forClass(
+                        RegistrationConfirmedEvent.class
+                );
+
+        verify(applicationEventPublisher)
+                .publishEvent(
+                        eventCaptor.capture()
+                );
+
+        RegistrationConfirmedEvent publishedEvent =
+                eventCaptor.getValue();
+
+        assertEquals(
+                registration.getRegistrationId(),
+                publishedEvent.registrationId()
+        );
+
+        assertEquals(
+                registration.getEvent().getEventId(),
+                publishedEvent.eventId()
+        );
+
+        assertEquals(
+                registration.getParticipant().getUserId(),
+                publishedEvent.participantId()
+        );
+
+        assertNotNull(
+                publishedEvent.occurredAt()
+        );
+
         assertEquals(
                 PaymentStatus.APPROVED,
                 response.status()
@@ -126,6 +165,8 @@ class PaymentServiceTest {
                 )
         );
 
+        verifyNoInteractions(applicationEventPublisher);
+
         verify(registrationRepository)
                 .findByIdForUpdate(999L);
 
@@ -162,6 +203,8 @@ class PaymentServiceTest {
                         30L
                 )
         );
+
+        verifyNoInteractions(applicationEventPublisher);
 
         verify(registrationRepository)
                 .findByIdForUpdate(100L);
@@ -211,6 +254,8 @@ class PaymentServiceTest {
                 exception.getMessage()
         );
 
+        verifyNoInteractions(applicationEventPublisher);
+
         verify(registrationRepository)
                 .findByIdForUpdate(100L);
 
@@ -259,6 +304,8 @@ class PaymentServiceTest {
                 exception.getMessage()
         );
 
+        verifyNoInteractions(applicationEventPublisher);
+
         verify(registrationRepository)
                 .findByIdForUpdate(100L);
 
@@ -301,6 +348,8 @@ class PaymentServiceTest {
                 "Registration reservation has expired",
                 exception.getMessage()
         );
+
+        verifyNoInteractions(applicationEventPublisher);
 
         verify(registrationRepository)
                 .findByIdForUpdate(100L);
@@ -355,6 +404,8 @@ class PaymentServiceTest {
         verify(paymentRepository, never())
                 .save(any(Payment.class));
 
+        verifyNoInteractions(applicationEventPublisher);
+
         assertEquals(
                 RegistrationStatus.PENDING,
                 registration.getStatus()
@@ -402,6 +453,8 @@ class PaymentServiceTest {
                 "Registration cannot be paid in its current status",
                 exception.getMessage()
         );
+
+        verifyNoInteractions(applicationEventPublisher);
 
         verifyNoInteractions(paymentRepository);
     }

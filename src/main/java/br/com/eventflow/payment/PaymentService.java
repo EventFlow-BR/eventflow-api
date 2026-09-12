@@ -4,8 +4,10 @@ import br.com.eventflow.payment.dto.PaymentResponse;
 import br.com.eventflow.registration.Registration;
 import br.com.eventflow.registration.RegistrationRepository;
 import br.com.eventflow.registration.enums.RegistrationStatus;
+import br.com.eventflow.registration.event.RegistrationConfirmedEvent;
 import br.com.eventflow.shared.exception.ConflictException;
 import br.com.eventflow.shared.exception.NotFoundException;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,13 +19,16 @@ public class PaymentService {
 
     private final PaymentRepository paymentRepository;
     private final RegistrationRepository registrationRepository;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public PaymentService(
             PaymentRepository paymentRepository,
-            RegistrationRepository registrationRepository
+            RegistrationRepository registrationRepository,
+            ApplicationEventPublisher applicationEventPublisher
     ) {
         this.paymentRepository = paymentRepository;
         this.registrationRepository = registrationRepository;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     @Transactional
@@ -75,6 +80,15 @@ public class PaymentService {
                 );
 
         registration.confirm();
+
+        applicationEventPublisher.publishEvent(
+                new RegistrationConfirmedEvent(
+                        registration.getRegistrationId(),
+                        registration.getEvent().getEventId(),
+                        registration.getParticipant().getUserId(),
+                        now
+                )
+        );
 
         Payment savedPayment =
                 paymentRepository.save(payment);
