@@ -5,6 +5,7 @@ import br.com.eventflow.payment.Payment;
 import br.com.eventflow.payment.PaymentRepository;
 import br.com.eventflow.payment.enums.PaymentStatus;
 import br.com.eventflow.registration.enums.RegistrationStatus;
+import br.com.eventflow.registration.event.RegistrationCancelledEvent;
 import br.com.eventflow.shared.exception.ConflictException;
 import br.com.eventflow.shared.exception.NotFoundException;
 import br.com.eventflow.user.User;
@@ -12,8 +13,10 @@ import br.com.eventflow.user.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -31,6 +34,9 @@ class RegistrationCancellationServiceTest {
     @Mock
     private PaymentRepository paymentRepository;
 
+    @Mock
+    private ApplicationEventPublisher applicationEventPublisher;
+
     private RegistrationCancellationService cancellationService;
 
     @BeforeEach
@@ -38,7 +44,8 @@ class RegistrationCancellationServiceTest {
         cancellationService =
                 new RegistrationCancellationService(
                         registrationRepository,
-                        paymentRepository
+                        paymentRepository,
+                        applicationEventPublisher
                 );
     }
 
@@ -61,6 +68,38 @@ class RegistrationCancellationServiceTest {
         cancellationService.cancelRegistration(
                 100L,
                 20L
+        );
+
+        ArgumentCaptor<RegistrationCancelledEvent> eventCaptor =
+                ArgumentCaptor.forClass(
+                        RegistrationCancelledEvent.class
+                );
+
+        verify(applicationEventPublisher)
+                .publishEvent(
+                        eventCaptor.capture()
+                );
+
+        RegistrationCancelledEvent publishedEvent =
+                eventCaptor.getValue();
+
+        assertEquals(
+                registration.getRegistrationId(),
+                publishedEvent.registrationId()
+        );
+
+        assertEquals(
+                registration.getEvent().getEventId(),
+                publishedEvent.eventId()
+        );
+
+        assertEquals(
+                registration.getParticipant().getUserId(),
+                publishedEvent.participantId()
+        );
+
+        assertNotNull(
+                publishedEvent.occurredAt()
         );
 
         assertEquals(
@@ -117,6 +156,11 @@ class RegistrationCancellationServiceTest {
                 payment.getStatus()
         );
 
+        verify(applicationEventPublisher)
+                .publishEvent(
+                        any(RegistrationCancelledEvent.class)
+                );
+
         verify(paymentRepository)
                 .flush();
 
@@ -154,6 +198,8 @@ class RegistrationCancellationServiceTest {
                 registration.getStatus()
         );
 
+        verifyNoInteractions(applicationEventPublisher);
+
         verifyNoInteractions(paymentRepository);
     }
 
@@ -171,6 +217,8 @@ class RegistrationCancellationServiceTest {
                                 20L
                         )
         );
+
+        verifyNoInteractions(applicationEventPublisher);
 
         verifyNoInteractions(paymentRepository);
     }
@@ -211,6 +259,8 @@ class RegistrationCancellationServiceTest {
                 exception.getMessage()
         );
 
+        verifyNoInteractions(applicationEventPublisher);
+
         verifyNoInteractions(paymentRepository);
     }
 
@@ -243,6 +293,8 @@ class RegistrationCancellationServiceTest {
                                 20L
                         )
         );
+
+        verifyNoInteractions(applicationEventPublisher);
 
         verifyNoInteractions(paymentRepository);
     }
@@ -282,6 +334,8 @@ class RegistrationCancellationServiceTest {
                 RegistrationStatus.PENDING,
                 registration.getStatus()
         );
+
+        verifyNoInteractions(applicationEventPublisher);
 
         verifyNoInteractions(paymentRepository);
     }
@@ -327,6 +381,8 @@ class RegistrationCancellationServiceTest {
                 RegistrationStatus.CONFIRMED,
                 registration.getStatus()
         );
+
+        verifyNoInteractions(applicationEventPublisher);
     }
 
     @Test
@@ -386,6 +442,8 @@ class RegistrationCancellationServiceTest {
                 PaymentStatus.REFUNDED,
                 payment.getStatus()
         );
+
+        verifyNoInteractions(applicationEventPublisher);
     }
 
     @Test
@@ -430,45 +488,11 @@ class RegistrationCancellationServiceTest {
                 registration.getStatus()
         );
 
+        verifyNoInteractions(applicationEventPublisher);
+
         verifyNoInteractions(paymentRepository);
     }
 
-
-    private void validateCancellation(
-            Registration registration,
-            OffsetDateTime now
-    ) {
-        if (!now.isBefore(
-                registration
-                        .getEvent()
-                        .getStartDate()
-        )) {
-
-            throw new ConflictException(
-                    "Registration cannot be cancelled after the event has started"
-            );
-        }
-
-        if (registration.getStatus() == RegistrationStatus.PENDING
-                && !registration
-                .getReservationExpiresAt()
-                .isAfter(now)) {
-
-            throw new ConflictException(
-                    "Registration reservation has expired"
-            );
-        }
-
-        if (registration.getStatus()
-                != RegistrationStatus.PENDING
-                && registration.getStatus()
-                != RegistrationStatus.CONFIRMED) {
-
-            throw new ConflictException(
-                    "Registration cannot be cancelled in its current status"
-            );
-        }
-    }
 
     private User participant(Long id) {
         User user = new User(
