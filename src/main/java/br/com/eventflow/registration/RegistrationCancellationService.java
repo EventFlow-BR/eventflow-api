@@ -4,8 +4,10 @@ import br.com.eventflow.payment.Payment;
 import br.com.eventflow.payment.PaymentRepository;
 import br.com.eventflow.payment.enums.PaymentStatus;
 import br.com.eventflow.registration.enums.RegistrationStatus;
+import br.com.eventflow.registration.event.RegistrationCancelledEvent;
 import br.com.eventflow.shared.exception.ConflictException;
 import br.com.eventflow.shared.exception.NotFoundException;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,13 +19,16 @@ public class RegistrationCancellationService {
 
     private final RegistrationRepository registrationRepository;
     private final PaymentRepository paymentRepository;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public RegistrationCancellationService(
             RegistrationRepository registrationRepository,
-            PaymentRepository paymentRepository
+            PaymentRepository paymentRepository,
+            ApplicationEventPublisher applicationEventPublisher
     ) {
         this.registrationRepository = registrationRepository;
         this.paymentRepository = paymentRepository;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     @Transactional
@@ -61,6 +66,15 @@ public class RegistrationCancellationService {
         }
 
         registration.cancel();
+
+        applicationEventPublisher.publishEvent(
+                new RegistrationCancelledEvent(
+                        registration.getRegistrationId(),
+                        registration.getEvent().getEventId(),
+                        registration.getParticipant().getUserId(),
+                        now
+                )
+        );
 
         registrationRepository.flush();
     }
