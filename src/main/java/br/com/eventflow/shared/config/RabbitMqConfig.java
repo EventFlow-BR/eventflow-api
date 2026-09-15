@@ -6,6 +6,7 @@ import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.converter.DefaultJacksonJavaTypeMapper;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.context.annotation.Bean;
@@ -51,7 +52,19 @@ public class RabbitMqConfig {
 
     @Bean
     MessageConverter rabbitMessageConverter() {
-        return new JacksonJsonMessageConverter();
+        JacksonJsonMessageConverter converter =
+                new JacksonJsonMessageConverter();
+
+        DefaultJacksonJavaTypeMapper typeMapper =
+                new DefaultJacksonJavaTypeMapper();
+
+        typeMapper.setTrustedPackages(
+                "br.com.eventflow.registration.messaging"
+        );
+
+        converter.setJavaTypeMapper(typeMapper);
+
+        return converter;
     }
 
     @Bean
