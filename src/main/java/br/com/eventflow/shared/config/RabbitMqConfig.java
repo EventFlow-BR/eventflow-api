@@ -1,9 +1,6 @@
 package br.com.eventflow.shared.config;
 
-import org.springframework.amqp.core.Binding;
-import org.springframework.amqp.core.BindingBuilder;
-import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.core.TopicExchange;
+import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.DefaultJacksonJavaTypeMapper;
@@ -24,6 +21,15 @@ public class RabbitMqConfig {
     public static final String REGISTRATION_ROUTING_PATTERN =
             "registration.*";
 
+    public static final String DEAD_LETTER_EXCHANGE =
+            "eventflow.events.dlx";
+
+    public static final String REGISTRATION_EVENTS_DLQ =
+            "eventflow.registration.events.dlq";
+
+    public static final String REGISTRATION_DEAD_LETTER_ROUTING_KEY =
+            "registration.dead";
+
     @Bean
     TopicExchange eventflowEventsExchange() {
         return new TopicExchange(
@@ -33,10 +39,17 @@ public class RabbitMqConfig {
 
     @Bean
     Queue registrationEventsQueue() {
-        return new Queue(
-                REGISTRATION_EVENTS_QUEUE,
-                true
-        );
+        return QueueBuilder
+                .durable(
+                        REGISTRATION_EVENTS_QUEUE
+                )
+                .deadLetterExchange(
+                        DEAD_LETTER_EXCHANGE
+                )
+                .deadLetterRoutingKey(
+                        REGISTRATION_DEAD_LETTER_ROUTING_KEY
+                )
+                .build();
     }
 
     @Bean
@@ -80,5 +93,38 @@ public class RabbitMqConfig {
         );
 
         return rabbitTemplate;
+    }
+
+    @Bean
+    TopicExchange eventflowDeadLetterExchange() {
+        return new TopicExchange(
+                DEAD_LETTER_EXCHANGE
+        );
+    }
+
+    @Bean
+    Queue registrationEventsDeadLetterQueue() {
+        return QueueBuilder
+                .durable(
+                        REGISTRATION_EVENTS_DLQ
+                )
+                .build();
+    }
+
+    @Bean
+    Binding registrationEventsDeadLetterBinding(
+            Queue registrationEventsDeadLetterQueue,
+            TopicExchange eventflowDeadLetterExchange
+    ) {
+        return BindingBuilder
+                .bind(
+                        registrationEventsDeadLetterQueue
+                )
+                .to(
+                        eventflowDeadLetterExchange
+                )
+                .with(
+                        REGISTRATION_DEAD_LETTER_ROUTING_KEY
+                );
     }
 }

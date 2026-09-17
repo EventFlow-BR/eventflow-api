@@ -8,6 +8,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.OffsetDateTime;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,5 +43,30 @@ class RegistrationEventConsumerTest {
 
         verify(registrationMessageHandler)
                 .handle(message);
+    }
+
+    @Test
+    void shouldPropagateExceptionWhenMessageHandlingFails() {
+        RegistrationMessage message =
+                new RegistrationMessage(
+                        100L,
+                        200L,
+                        20L,
+                        "registration.confirmed",
+                        OffsetDateTime.now()
+                );
+
+        doThrow(
+                new RuntimeException(
+                        "Processing failure"
+                )
+        )
+                .when(registrationMessageHandler)
+                .handle(message);
+
+        assertThrows(
+                RuntimeException.class,
+                () -> consumer.consume(message)
+        );
     }
 }
