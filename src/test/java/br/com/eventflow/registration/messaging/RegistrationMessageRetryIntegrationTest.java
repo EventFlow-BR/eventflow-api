@@ -3,6 +3,7 @@ package br.com.eventflow.registration.messaging;
 import br.com.eventflow.shared.config.RabbitMqConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
+import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -13,6 +14,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.timeout;
@@ -36,7 +38,7 @@ class RegistrationMessageRetryIntegrationTest {
     private RegistrationMessageHandler registrationMessageHandler;
 
     @Test
-    void shouldRetryRegistrationMessageThreeTimesWhenHandlerFails() {
+    void shouldRetryRegistrationMessageAndSucceedBeforeRetriesAreExhausted() {
         amqpAdmin.purgeQueue(
                 RabbitMqConfig.REGISTRATION_EVENTS_QUEUE,
                 false
@@ -64,9 +66,15 @@ class RegistrationMessageRetryIntegrationTest {
 
         doThrow(
                 new RuntimeException(
-                        "Simulated processing failure"
+                        "Transient failure 1"
                 )
         )
+                .doThrow(
+                        new RuntimeException(
+                                "Transient failure 2"
+                        )
+                )
+                .doNothing()
                 .when(registrationMessageHandler)
                 .handle(
                         argThat(consumedMessage ->
@@ -91,6 +99,16 @@ class RegistrationMessageRetryIntegrationTest {
                                 .registrationId()
                                 .equals(registrationId)
                 )
+        );
+
+        Message deadLetterMessage =
+                rabbitTemplate.receive(
+                        RabbitMqConfig.REGISTRATION_EVENTS_DLQ,
+                        1_000
+                );
+
+        assertNull(
+                deadLetterMessage
         );
     }
 }
