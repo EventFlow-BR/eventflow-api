@@ -2,14 +2,13 @@ package br.com.eventflow.registration.messaging;
 
 import br.com.eventflow.registration.event.RegistrationConfirmedEvent;
 import br.com.eventflow.shared.config.RabbitMqConfig;
+import br.com.eventflow.testinfra.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -17,9 +16,8 @@ import java.time.OffsetDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-@SpringBootTest
-@ActiveProfiles("local")
-class RegistrationConfirmedRollbackIntegrationTest {
+class RegistrationConfirmedRollbackIntegrationTest
+        extends AbstractIntegrationTest {
 
     @Autowired
     private ApplicationEventPublisher applicationEventPublisher;

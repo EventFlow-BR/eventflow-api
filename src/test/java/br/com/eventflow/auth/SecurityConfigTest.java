@@ -4,12 +4,12 @@ import br.com.eventflow.event.EventService;
 import br.com.eventflow.payment.PaymentService;
 import br.com.eventflow.registration.RegistrationCancellationService;
 import br.com.eventflow.registration.RegistrationService;
+import br.com.eventflow.testinfra.AbstractIntegrationTest;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRole;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
@@ -17,7 +17,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -32,9 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("local")
 @TestPropertySource(properties = {
         "app.jwt.secret=eventflow-test-secret-key-with-at-least-32-bytes",
         "app.jwt.expiration=3600000",
@@ -42,7 +39,8 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
         "app.auth.cookie-secure=false"
 })
 @Import(SecurityConfigTest.TestEndpointsConfiguration.class)
-class SecurityConfigTest {
+class SecurityConfigTest
+        extends AbstractIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;

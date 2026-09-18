@@ -2,14 +2,13 @@ package br.com.eventflow.event;
 
 import br.com.eventflow.event.dto.EventResponse;
 import br.com.eventflow.event.dto.UpdateEventRequest;
+import br.com.eventflow.testinfra.AbstractIntegrationTest;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -17,10 +16,9 @@ import java.time.OffsetDateTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
-@ActiveProfiles("local")
 @Transactional
-class EventUpdateIntegrationTest {
+class EventUpdateIntegrationTest
+    extends AbstractIntegrationTest {
 
     @Autowired
     private EventService eventService;

@@ -8,13 +8,12 @@ import br.com.eventflow.payment.PaymentService;
 import br.com.eventflow.payment.enums.PaymentStatus;
 import br.com.eventflow.registration.enums.RegistrationStatus;
 import br.com.eventflow.shared.exception.ConflictException;
+import br.com.eventflow.testinfra.AbstractIntegrationTest;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -26,9 +25,8 @@ import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
-@ActiveProfiles("local")
-class RegistrationCancellationPaymentConcurrencyIntegrationTest {
+class RegistrationCancellationPaymentConcurrencyIntegrationTest
+        extends AbstractIntegrationTest {
 
     @Autowired
     private RegistrationCancellationService cancellationService;

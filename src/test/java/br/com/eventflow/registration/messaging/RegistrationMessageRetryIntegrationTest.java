@@ -1,13 +1,12 @@
 package br.com.eventflow.registration.messaging;
 
 import br.com.eventflow.shared.config.RabbitMqConfig;
+import br.com.eventflow.testinfra.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -20,13 +19,12 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
-@SpringBootTest
-@ActiveProfiles("local")
 @TestPropertySource(
         properties =
                 "app.rabbitmq.registration-consumer.enabled=true"
 )
-class RegistrationMessageRetryIntegrationTest {
+class RegistrationMessageRetryIntegrationTest
+        extends AbstractIntegrationTest {
 
     @Autowired
     private RabbitTemplate rabbitTemplate;

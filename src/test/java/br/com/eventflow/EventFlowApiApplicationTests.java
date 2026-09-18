@@ -1,12 +1,10 @@
 package br.com.eventflow;
 
+import br.com.eventflow.testinfra.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 
-@SpringBootTest
-@ActiveProfiles("local")
-class EventFlowApiApplicationTests {
+class EventFlowApiApplicationTests
+        extends AbstractIntegrationTest {
 
     @Test
     void contextLoads() {
