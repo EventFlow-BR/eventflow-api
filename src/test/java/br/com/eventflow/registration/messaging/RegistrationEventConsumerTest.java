@@ -7,6 +7,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
@@ -16,7 +17,7 @@ import static org.mockito.Mockito.verify;
 class RegistrationEventConsumerTest {
 
     @Mock
-    private RegistrationMessageHandler registrationMessageHandler;
+    private RegistrationMessageProcessor registrationMessageProcessor;
 
     private RegistrationEventConsumer consumer;
 
@@ -24,14 +25,15 @@ class RegistrationEventConsumerTest {
     void setUp() {
         consumer =
                 new RegistrationEventConsumer(
-                        registrationMessageHandler
+                        registrationMessageProcessor
                 );
     }
 
     @Test
-    void shouldDelegateConsumedMessageToHandler() {
+    void shouldDelegateConsumedMessageToProcessor() {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         100L,
                         200L,
                         20L,
@@ -41,14 +43,15 @@ class RegistrationEventConsumerTest {
 
         consumer.consume(message);
 
-        verify(registrationMessageHandler)
-                .handle(message);
+        verify(registrationMessageProcessor)
+                .process(message);
     }
 
     @Test
-    void shouldPropagateExceptionWhenMessageHandlingFails() {
+    void shouldPropagateExceptionWhenProcessingFails() {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         100L,
                         200L,
                         20L,
@@ -61,8 +64,8 @@ class RegistrationEventConsumerTest {
                         "Processing failure"
                 )
         )
-                .when(registrationMessageHandler)
-                .handle(message);
+                .when(registrationMessageProcessor)
+                .process(message);
 
         assertThrows(
                 RuntimeException.class,

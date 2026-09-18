@@ -1,6 +1,7 @@
 package br.com.eventflow.registration.messaging;
 
 import br.com.eventflow.shared.config.RabbitMqConfig;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -14,8 +15,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.Mockito.timeout;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
 
 @SpringBootTest
 @ActiveProfiles("local")
@@ -31,16 +31,29 @@ class RegistrationEventConsumerIntegrationTest {
     @Autowired
     private AmqpAdmin amqpAdmin;
 
+    @Autowired
+    private ProcessedMessageRepository processedMessageRepository;
+
     @MockitoBean
     private RegistrationMessageHandler registrationMessageHandler;
 
-    @Test
-    void shouldConsumeRegistrationMessageFromRabbitMq() {
+
+    @BeforeEach
+    void setUp() {
         amqpAdmin.purgeQueue(
                 RabbitMqConfig.REGISTRATION_EVENTS_QUEUE,
                 false
         );
 
+        processedMessageRepository.deleteAll();
+
+        clearInvocations(
+                registrationMessageHandler
+        );
+    }
+
+    @Test
+    void shouldConsumeRegistrationMessageFromRabbitMq() {
         Long registrationId =
                 Math.abs(
                         UUID.randomUUID()
@@ -64,6 +77,7 @@ class RegistrationEventConsumerIntegrationTest {
 
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         registrationId,
                         eventId,
                         participantId,
@@ -98,11 +112,6 @@ class RegistrationEventConsumerIntegrationTest {
 
     @Test
     void shouldConsumeRegistrationCancelledMessageFromRabbitMq() {
-        amqpAdmin.purgeQueue(
-                RabbitMqConfig.REGISTRATION_EVENTS_QUEUE,
-                false
-        );
-
         Long registrationId =
                 Math.abs(
                         UUID.randomUUID()
@@ -126,6 +135,7 @@ class RegistrationEventConsumerIntegrationTest {
 
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         registrationId,
                         eventId,
                         participantId,
@@ -160,11 +170,6 @@ class RegistrationEventConsumerIntegrationTest {
 
     @Test
     void shouldConsumeRegistrationExpiredMessageFromRabbitMq() {
-        amqpAdmin.purgeQueue(
-                RabbitMqConfig.REGISTRATION_EVENTS_QUEUE,
-                false
-        );
-
         Long registrationId =
                 Math.abs(
                         UUID.randomUUID()
@@ -188,6 +193,7 @@ class RegistrationEventConsumerIntegrationTest {
 
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         registrationId,
                         eventId,
                         participantId,
@@ -216,6 +222,44 @@ class RegistrationEventConsumerIntegrationTest {
                                 .equals("registration.expired")
                                 && consumedMessage.occurredAt()
                                 .isEqual(occurredAt)
+                )
+        );
+    }
+
+    @Test
+    void shouldProcessDuplicateRabbitMqMessageOnlyOnce() {
+        UUID messageId =
+                UUID.randomUUID();
+
+        RegistrationMessage message =
+                new RegistrationMessage(
+                        messageId,
+                        100L,
+                        200L,
+                        20L,
+                        "registration.confirmed",
+                        OffsetDateTime.now()
+                );
+
+        rabbitTemplate.convertAndSend(
+                RabbitMqConfig.EVENTS_EXCHANGE,
+                "registration.confirmed",
+                message
+        );
+
+        rabbitTemplate.convertAndSend(
+                RabbitMqConfig.EVENTS_EXCHANGE,
+                "registration.confirmed",
+                message
+        );
+
+        verify(
+                registrationMessageHandler,
+                after(3_000).times(1)
+        ).handle(
+                argThat(consumedMessage ->
+                        consumedMessage.messageId()
+                                .equals(messageId)
                 )
         );
     }

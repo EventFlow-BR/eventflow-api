@@ -5,6 +5,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
+import java.util.UUID;
+
 @Component
 public class RegistrationConfirmedEventListener {
 
@@ -27,6 +29,7 @@ public class RegistrationConfirmedEventListener {
     ) {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         event.registrationId(),
                         event.eventId(),
                         event.participantId(),

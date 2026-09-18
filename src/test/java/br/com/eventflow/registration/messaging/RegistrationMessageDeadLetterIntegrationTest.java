@@ -57,6 +57,7 @@ class RegistrationMessageDeadLetterIntegrationTest {
 
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         registrationId,
                         200L,
                         20L,

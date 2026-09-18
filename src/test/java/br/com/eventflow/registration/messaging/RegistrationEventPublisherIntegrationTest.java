@@ -12,6 +12,7 @@ import org.springframework.test.context.TestPropertySource;
 
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,18 +40,22 @@ class RegistrationEventPublisherIntegrationTest {
                 false
         );
 
+        UUID messageId =
+                UUID.randomUUID();
+
         RegistrationMessage message =
                 new RegistrationMessage(
+                        messageId,
                         100L,
-                        50L,
+                        200L,
                         20L,
-                        "registration.test",
+                        "registration.confirmed",
                         OffsetDateTime.now()
                 );
 
         publisher.publish(
                 message,
-                "registration.test"
+                "registration.confirmed"
         );
 
         Message receivedMessage =
@@ -69,13 +74,21 @@ class RegistrationEventPublisherIntegrationTest {
 
         assertTrue(
                 payload.contains(
+                        "\"messageId\":\""
+                                + messageId
+                                + "\""
+                )
+        );
+
+        assertTrue(
+                payload.contains(
                         "\"registrationId\":100"
                 )
         );
 
         assertTrue(
                 payload.contains(
-                        "\"eventId\":50"
+                        "\"eventId\":200"
                 )
         );
 
@@ -87,7 +100,7 @@ class RegistrationEventPublisherIntegrationTest {
 
         assertTrue(
                 payload.contains(
-                        "\"eventType\":\"registration.test\""
+                        "\"eventType\":\"registration.confirmed\""
                 )
         );
     }

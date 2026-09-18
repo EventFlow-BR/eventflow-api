@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
@@ -21,6 +22,7 @@ class RegistrationMessageHandlerTest {
     void shouldHandleRegistrationConfirmedMessage() {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         100L,
                         200L,
                         20L,
@@ -37,6 +39,7 @@ class RegistrationMessageHandlerTest {
     void shouldHandleRegistrationCancelledMessage() {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         100L,
                         200L,
                         20L,
@@ -53,6 +56,7 @@ class RegistrationMessageHandlerTest {
     void shouldHandleRegistrationExpiredMessage() {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         100L,
                         200L,
                         20L,
@@ -69,6 +73,7 @@ class RegistrationMessageHandlerTest {
     void shouldSafelyHandleUnsupportedRegistrationMessageType() {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         100L,
                         200L,
                         20L,
@@ -85,6 +90,7 @@ class RegistrationMessageHandlerTest {
     void shouldSafelyHandleNullEventType() {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         100L,
                         200L,
                         20L,
@@ -101,10 +107,11 @@ class RegistrationMessageHandlerTest {
     void shouldSafelyHandleBlankEventType() {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         100L,
                         200L,
                         20L,
-                        "   ",
+                        " ",
                         OffsetDateTime.now()
                 );
 
