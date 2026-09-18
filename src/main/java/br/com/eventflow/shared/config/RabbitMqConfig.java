@@ -3,11 +3,13 @@ package br.com.eventflow.shared.config;
 import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.transaction.RabbitTransactionManager;
 import org.springframework.amqp.support.converter.DefaultJacksonJavaTypeMapper;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 @Configuration
 public class RabbitMqConfig {
@@ -81,6 +83,7 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    @Primary
     RabbitTemplate rabbitTemplate(
             ConnectionFactory connectionFactory,
             MessageConverter rabbitMessageConverter
@@ -93,6 +96,32 @@ public class RabbitMqConfig {
         );
 
         return rabbitTemplate;
+    }
+
+    @Bean(name = "registrationReplayRabbitTemplate")
+    public RabbitTemplate registrationReplayRabbitTemplate(
+            ConnectionFactory connectionFactory,
+            MessageConverter messageConverter
+    ) {
+        RabbitTemplate rabbitTemplate =
+                new RabbitTemplate(connectionFactory);
+
+        rabbitTemplate.setMessageConverter(
+                messageConverter
+        );
+
+        rabbitTemplate.setChannelTransacted(true);
+
+        return rabbitTemplate;
+    }
+
+    @Bean
+    public RabbitTransactionManager rabbitTransactionManager(
+            ConnectionFactory connectionFactory
+    ) {
+        return new RabbitTransactionManager(
+                connectionFactory
+        );
     }
 
     @Bean
