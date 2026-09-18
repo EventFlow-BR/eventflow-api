@@ -5,6 +5,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
+import java.util.UUID;
+
 @Component
 public class RegistrationExpiredEventListener {
 
@@ -27,6 +29,7 @@ public class RegistrationExpiredEventListener {
     ) {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         event.registrationId(),
                         event.eventId(),
                         event.participantId(),

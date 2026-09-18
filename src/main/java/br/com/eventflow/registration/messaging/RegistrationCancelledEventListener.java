@@ -1,10 +1,11 @@
 package br.com.eventflow.registration.messaging;
 
-import br.com.eventflow.registration.Registration;
 import br.com.eventflow.registration.event.RegistrationCancelledEvent;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+
+import java.util.UUID;
 
 @Component
 public class RegistrationCancelledEventListener {
@@ -28,6 +29,7 @@ public class RegistrationCancelledEventListener {
     ) {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         event.registrationId(),
                         event.eventId(),
                         event.participantId(),

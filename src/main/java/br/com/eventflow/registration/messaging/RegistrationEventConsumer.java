@@ -16,13 +16,13 @@ import org.springframework.stereotype.Component;
 )
 public class RegistrationEventConsumer {
 
-    private final RegistrationMessageHandler registrationMessageHandler;
+    private final RegistrationMessageProcessor registrationMessageProcessor;
 
     public RegistrationEventConsumer(
-            RegistrationMessageHandler registrationMessageHandler
+            RegistrationMessageProcessor registrationMessageProcessor
     ) {
-        this.registrationMessageHandler =
-                registrationMessageHandler;
+        this.registrationMessageProcessor =
+                registrationMessageProcessor;
     }
 
     private static final Logger logger =
@@ -37,12 +37,13 @@ public class RegistrationEventConsumer {
             RegistrationMessage message
     ) {
         try {
-            registrationMessageHandler.handle(message);
+            registrationMessageProcessor.process(message);
 
         } catch (RuntimeException exception) {
 
             logger.error(
-                    "Failed to process registration message: registrationId={}, eventType={}",
+                    "Failed to process registration message: messageId={}, registrationId={}, eventType={}",
+                    message.messageId(),
                     message.registrationId(),
                     message.eventType(),
                     exception

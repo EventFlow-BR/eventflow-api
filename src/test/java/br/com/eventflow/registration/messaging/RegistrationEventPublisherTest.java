@@ -9,6 +9,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 import static org.mockito.Mockito.verify;
 
@@ -32,10 +33,11 @@ class RegistrationEventPublisherTest {
     void shouldPublishRegistrationMessageUsingExpectedExchangeAndRoutingKey() {
         RegistrationMessage message =
                 new RegistrationMessage(
+                        UUID.randomUUID(),
                         100L,
-                        50L,
+                        200L,
                         20L,
-                        "registration.test",
+                        "registration.confirmed",
                         OffsetDateTime.now()
                 );
 
