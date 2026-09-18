@@ -6,6 +6,7 @@ import br.com.eventflow.payment.PaymentService;
 import br.com.eventflow.registration.Registration;
 import br.com.eventflow.registration.RegistrationRepository;
 import br.com.eventflow.shared.config.RabbitMqConfig;
+import br.com.eventflow.testinfra.AbstractIntegrationTest;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
@@ -14,9 +15,6 @@ import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -26,12 +24,8 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest
-@ActiveProfiles("local")
-@TestPropertySource(
-        properties = "spring.rabbitmq.listener.simple.auto-startup=false"
-)
-class RegistrationConfirmedAfterCommitIntegrationTest {
+class RegistrationConfirmedAfterCommitIntegrationTest
+        extends AbstractIntegrationTest {
 
     @Autowired
     private PaymentService paymentService;

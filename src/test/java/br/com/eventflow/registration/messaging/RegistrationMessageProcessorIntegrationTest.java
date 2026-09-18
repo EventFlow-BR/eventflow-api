@@ -1,10 +1,9 @@
 package br.com.eventflow.registration.messaging;
 
+import br.com.eventflow.testinfra.AbstractIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.OffsetDateTime;
@@ -17,9 +16,10 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest
-@ActiveProfiles("local")
-class RegistrationMessageProcessorIntegrationTest {
+
+class RegistrationMessageProcessorIntegrationTest
+        extends AbstractIntegrationTest {
+
 
     @Autowired
     private RegistrationMessageProcessor processor;
