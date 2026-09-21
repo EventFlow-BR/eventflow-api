@@ -32,6 +32,19 @@ services:
     volumes:
       - eventflow-rabbitmq-data:/var/lib/rabbitmq
 
+  redis:
+    image: redis:7.4-alpine
+    container_name: eventflow-redis
+
+    ports:
+      - "6379:6379"
+
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   eventflow-postgres-data:
   eventflow-rabbitmq-data:

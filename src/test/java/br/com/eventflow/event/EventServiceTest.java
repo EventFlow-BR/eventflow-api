@@ -33,13 +33,17 @@ class EventServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private EventCachedReadService eventCachedReadService;
+
     private EventService eventService;
 
     @BeforeEach
     void setUp() {
         eventService = new EventService(
                 eventRepository,
-                userRepository
+                userRepository,
+                eventCachedReadService
         );
     }
 
@@ -305,8 +309,10 @@ class EventServiceTest {
                 EventStatus.PUBLISHED
         );
 
-        when(eventRepository.findById(100L))
-                .thenReturn(Optional.of(event));
+        when(eventCachedReadService.getById(100L))
+                .thenReturn(
+                        EventResponseMapper.toResponse(event)
+                );
 
         EventResponse response =
                 eventService.getVisibleEvent(
@@ -340,8 +346,10 @@ class EventServiceTest {
                 new BigDecimal("50.00")
         );
 
-        when(eventRepository.findById(100L))
-                .thenReturn(Optional.of(event));
+        when(eventCachedReadService.getById(100L))
+                .thenReturn(
+                        EventResponseMapper.toResponse(event)
+                );
 
         NotFoundException exception =
                 assertThrows(
@@ -378,8 +386,10 @@ class EventServiceTest {
                 new BigDecimal("50.00")
         );
 
-        when(eventRepository.findById(100L))
-                .thenReturn(Optional.of(event));
+        when(eventCachedReadService.getById(100L))
+                .thenReturn(
+                        EventResponseMapper.toResponse(event)
+                );
 
         EventResponse response =
                 eventService.getVisibleEvent(
@@ -413,8 +423,10 @@ class EventServiceTest {
                 new BigDecimal("50.00")
         );
 
-        when(eventRepository.findById(100L))
-                .thenReturn(Optional.of(event));
+        when(eventCachedReadService.getById(100L))
+                .thenReturn(
+                        EventResponseMapper.toResponse(event)
+                );
 
         NotFoundException exception =
                 assertThrows(
@@ -434,8 +446,12 @@ class EventServiceTest {
 
     @Test
     void shouldReturnNotFoundWhenEventDoesNotExist() {
-        when(eventRepository.findById(999L))
-                .thenReturn(Optional.empty());
+        when(eventCachedReadService.getById(999L))
+                .thenThrow(
+                        new NotFoundException(
+                                "Event not found"
+                        )
+                );
 
         NotFoundException exception =
                 assertThrows(
