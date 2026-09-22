@@ -201,6 +201,33 @@ class EventCacheIntegrationTest
                 request
         );
 
+        String persistedName =
+                jdbcTemplate.queryForObject(
+                        """
+                        SELECT name
+                        FROM events
+                        WHERE event_id = ?
+                        """,
+                        String.class,
+                        eventId
+                );
+
+        assertEquals(
+                "Updated Event",
+                persistedName,
+                "PostgreSQL should contain the updated event"
+        );
+
+        Cache cache =
+                cacheManager.getCache("events");
+
+        assertNotNull(cache);
+
+        assertNull(
+                cache.get(eventId),
+                "Event should have been evicted from Redis after update"
+        );
+
         EventResponse afterUpdate =
                 eventCachedReadService.getById(
                         eventId
@@ -318,6 +345,33 @@ class EventCacheIntegrationTest
         eventService.cancelEvent(
                 eventId,
                 organizerId
+        );
+
+        String persistedStatus =
+                jdbcTemplate.queryForObject(
+                        """
+                        SELECT status
+                        FROM events
+                        WHERE event_id = ?
+                        """,
+                        String.class,
+                        eventId
+                );
+
+        assertEquals(
+                "CANCELLED",
+                persistedStatus,
+                "PostgreSQL should contain the cancelled event"
+        );
+
+        Cache cache =
+                cacheManager.getCache("events");
+
+        assertNotNull(cache);
+
+        assertNull(
+                cache.get(eventId),
+                "Event should have been evicted from Redis after cancellation"
         );
 
 

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -38,6 +39,9 @@ class RegistrationServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private RegistrationService registrationService;
 
     @BeforeEach
@@ -47,7 +51,8 @@ class RegistrationServiceTest {
                         registrationRepository,
                         eventRepository,
                         userRepository,
-                        15
+                        15,
+                        eventPublisher
                 );
     }
 
@@ -122,6 +127,14 @@ class RegistrationServiceTest {
 
         verify(registrationRepository)
                 .save(any(Registration.class));
+
+        verify(eventPublisher)
+                .publishEvent(
+                        new RegistrationCreatedEvent(
+                                100L,
+                                20L
+                        )
+                );
     }
 
     @Test
@@ -360,6 +373,8 @@ class RegistrationServiceTest {
 
         verify(registrationRepository, never())
                 .save(any());
+
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
