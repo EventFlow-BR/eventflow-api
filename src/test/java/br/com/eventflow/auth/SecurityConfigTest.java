@@ -112,6 +112,40 @@ class SecurityConfigTest
     }
 
     @Test
+    void shouldProtectPrometheusWithoutAuthentication()
+            throws Exception {
+
+        mockMvc.perform(
+                        get("/actuator/prometheus")
+                )
+                .andExpect(
+                        status().is4xxClientError()
+                );
+    }
+
+    @Test
+    void shouldAllowAuthenticatedAccessToPrometheus()
+            throws Exception {
+
+        String token =
+                generateTokenFor(
+                        20L,
+                        UserRole.PARTICIPANT
+                );
+
+        mockMvc.perform(
+                        get("/actuator/prometheus")
+                                .cookie(
+                                        new Cookie(
+                                                "eventflow_token",
+                                                token
+                                        )
+                                )
+                )
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void shouldProtectOtherEndpoints() throws Exception {
         mockMvc.perform(get("/test/protected"))
                 .andExpect(status().is4xxClientError());

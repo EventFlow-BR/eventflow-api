@@ -43,6 +43,11 @@ public class SecurityConfig {
                                 "/api/auth/logout",
                                 "/actuator/health"
                         ).permitAll()
+
+                        .requestMatchers(
+                                "/actuator/prometheus"
+                        ).authenticated()
+
                         .requestMatchers(
                                 HttpMethod.POST,
                                 "/api/events/*/cancel"

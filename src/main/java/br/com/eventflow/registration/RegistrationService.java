@@ -13,6 +13,7 @@ import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,7 @@ public class RegistrationService {
     private final RegistrationRepository registrationRepository;
     private final EventRepository eventRepository;
     private final UserRepository userRepository;
+    private final ApplicationEventPublisher eventPublisher;
     private final long reservationTimeoutMinutes;
 
     public RegistrationService(
@@ -32,12 +34,14 @@ public class RegistrationService {
             EventRepository eventRepository,
             UserRepository userRepository,
             @Value("${app.registration.reservation-timeout-minutes}")
-            long reservationTimeoutMinutes
+            long reservationTimeoutMinutes,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.registrationRepository = registrationRepository;
         this.eventRepository = eventRepository;
         this.userRepository = userRepository;
         this.reservationTimeoutMinutes = reservationTimeoutMinutes;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -115,6 +119,13 @@ public class RegistrationService {
                 registrationRepository.save(
                         registration
                 );
+
+        eventPublisher.publishEvent(
+                new RegistrationCreatedEvent(
+                        eventId,
+                        participantId
+                )
+        );
 
         return toResponse(savedRegistration);
     }
