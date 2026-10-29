@@ -1,0 +1,667 @@
+package br.com.eventflow.event;
+
+import br.com.eventflow.event.dto.CreateEventRequest;
+import br.com.eventflow.event.dto.EventResponse;
+import br.com.eventflow.event.dto.UpdateEventRequest;
+import br.com.eventflow.shared.exception.BadRequestException;
+import br.com.eventflow.shared.exception.ConflictException;
+import br.com.eventflow.shared.exception.GlobalExceptionHandler;
+import br.com.eventflow.shared.exception.NotFoundException;
+import br.com.eventflow.user.UserRole;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+
+@WebMvcTest(controllers = EventController.class)
+@Import(GlobalExceptionHandler.class)
+class EventControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private EventService eventService;
+
+    @Test
+    void shouldCreateEventUsingAuthenticatedOrganizerId()
+            throws Exception {
+
+        EventResponse response =
+                new EventResponse(
+                        100L,
+                        10L,
+                        "Java Conference",
+                        "Backend conference",
+                        "Petrópolis",
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
+                        100,
+                        new BigDecimal("50.00"),
+                        EventStatus.DRAFT,
+                        null,
+                        null,
+                        null
+                );
+
+        when(eventService.createEvent(
+                eq(10L),
+                any(CreateEventRequest.class)
+        )).thenReturn(response);
+
+        mockMvc.perform(
+                        post("/api/events")
+                                .principal(
+                                        new UsernamePasswordAuthenticationToken(
+                                                10L,
+                                                null,
+                                                List.of(
+                                                        new SimpleGrantedAuthority(
+                                                                "ROLE_ORGANIZER"
+                                                        )
+                                                )
+                                        )
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(validRequestBody())
+                )
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(100))
+                .andExpect(jsonPath("$.organizerId").value(10))
+                .andExpect(jsonPath("$.name")
+                        .value("Java Conference"))
+                .andExpect(jsonPath("$.status")
+                        .value("DRAFT"));
+
+        verify(eventService)
+                .createEvent(
+                        eq(10L),
+                        any(CreateEventRequest.class)
+                );
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenPayloadIsInvalid()
+            throws Exception {
+
+        mockMvc.perform(
+                        post("/api/events")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "name": "",
+                                          "description": "",
+                                          "location": "",
+                                          "startDate": null,
+                                          "endDate": null,
+                                          "capacity": 0,
+                                          "price": -1
+                                        }
+                                        """)
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.name").exists())
+                .andExpect(jsonPath("$.fieldErrors.description").exists())
+                .andExpect(jsonPath("$.fieldErrors.location").exists())
+                .andExpect(jsonPath("$.fieldErrors.startDate").exists())
+                .andExpect(jsonPath("$.fieldErrors.endDate").exists())
+                .andExpect(jsonPath("$.fieldErrors.capacity").exists())
+                .andExpect(jsonPath("$.fieldErrors.price").exists());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0.00", "-1.00"})
+    void shouldRejectNonPositivePriceOnCreation(String price) throws Exception {
+        mockMvc.perform(post("/api/events")
+                        .principal(organizerAuthentication())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestBody().replace("50.00", price)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.price").exists());
+
+        verifyNoInteractions(eventService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0.00", "-1.00"})
+    void shouldRejectNonPositivePriceOnUpdate(String price) throws Exception {
+        mockMvc.perform(put("/api/events/100")
+                        .principal(organizerAuthentication())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validUpdateRequestBody().replace("75.00", price)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.price").exists());
+
+        verifyNoInteractions(eventService);
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenPriceExceedsAllowedPrecision()
+            throws Exception {
+
+        mockMvc.perform(
+                        post("/api/events")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "name": "Java Conference",
+                                          "description": "Backend conference",
+                                          "location": "Petrópolis",
+                                          "startDate": "2026-10-10T10:00:00-03:00",
+                                          "endDate": "2026-10-10T18:00:00-03:00",
+                                          "capacity": 100,
+                                          "price": 123456789.123
+                                        }
+                                        """)
+                )
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenServiceRejectsInvalidDates()
+            throws Exception {
+
+        when(eventService.createEvent(
+                eq(10L),
+                any(CreateEventRequest.class)
+        )).thenThrow(
+                new BadRequestException(
+                        "Event start must be before end date"
+                )
+        );
+
+        mockMvc.perform(
+                        post("/api/events")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(validRequestBody())
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message")
+                        .value("Event start must be before end date"));
+    }
+
+    @Test
+    void shouldListVisibleEventsForAuthenticatedUser()
+            throws Exception {
+
+        EventResponse response =
+                new EventResponse(
+                        100L,
+                        10L,
+                        "Published Event",
+                        "Description",
+                        "Petrópolis",
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
+                        100,
+                        new BigDecimal("50.00"),
+                        EventStatus.PUBLISHED,
+                        OffsetDateTime.parse(
+                                "2026-09-10T10:00:00-03:00"
+                        ),
+                        null,
+                        null
+                );
+
+        when(eventService.listVisibleEvents(
+                20L,
+                UserRole.PARTICIPANT
+        )).thenReturn(List.of(response));
+
+        mockMvc.perform(
+                        get("/api/events")
+                                .principal(
+                                        participantAuthentication()
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(100))
+                .andExpect(jsonPath("$[0].name")
+                        .value("Published Event"))
+                .andExpect(jsonPath("$[0].status")
+                        .value("PUBLISHED"));
+
+        verify(eventService)
+                .listVisibleEvents(
+                        20L,
+                        UserRole.PARTICIPANT
+                );
+    }
+
+    @Test
+    void shouldReturnVisibleEventDetails()
+            throws Exception {
+
+        EventResponse response =
+                new EventResponse(
+                        100L,
+                        10L,
+                        "Published Event",
+                        "Description",
+                        "Petrópolis",
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
+                        100,
+                        new BigDecimal("50.00"),
+                        EventStatus.PUBLISHED,
+                        null,
+                        null,
+                        null
+                );
+
+        when(eventService.getVisibleEvent(
+                100L,
+                20L,
+                UserRole.PARTICIPANT
+        )).thenReturn(response);
+
+        mockMvc.perform(
+                        get("/api/events/100")
+                                .principal(
+                                        participantAuthentication()
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(100))
+                .andExpect(jsonPath("$.name")
+                        .value("Published Event"))
+                .andExpect(jsonPath("$.status")
+                        .value("PUBLISHED"));
+
+        verify(eventService)
+                .getVisibleEvent(
+                        100L,
+                        20L,
+                        UserRole.PARTICIPANT
+                );
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenEventIsNotVisible()
+            throws Exception {
+
+        when(eventService.getVisibleEvent(
+                100L,
+                20L,
+                UserRole.PARTICIPANT
+        )).thenThrow(
+                new NotFoundException("Event not found")
+        );
+
+        mockMvc.perform(
+                        get("/api/events/100")
+                                .principal(
+                                        participantAuthentication()
+                                )
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message")
+                        .value("Event not found"));
+    }
+
+    @Test
+    void shouldUpdateEventUsingAuthenticatedOrganizerId()
+            throws Exception {
+
+        EventResponse response =
+                new EventResponse(
+                        100L,
+                        10L,
+                        "Updated Event",
+                        "Updated description",
+                        "Teresópolis",
+                        OffsetDateTime.parse(
+                                "2026-11-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-11-10T18:00:00-03:00"
+                        ),
+                        200,
+                        new BigDecimal("75.00"),
+                        EventStatus.DRAFT,
+                        null,
+                        null,
+                        null
+                );
+
+        when(eventService.updateEvent(
+                eq(100L),
+                eq(10L),
+                any(UpdateEventRequest.class)
+        )).thenReturn(response);
+
+        mockMvc.perform(
+                        put("/api/events/100")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                                .contentType(
+                                        MediaType.APPLICATION_JSON
+                                )
+                                .content(validUpdateRequestBody())
+                )
+                .andExpect(status().isOk())
+                .andExpect(
+                        jsonPath("$.id").value(100)
+                )
+                .andExpect(
+                        jsonPath("$.organizerId").value(10)
+                )
+                .andExpect(
+                        jsonPath("$.name")
+                                .value("Updated Event")
+                );
+
+        verify(eventService)
+                .updateEvent(
+                        eq(100L),
+                        eq(10L),
+                        any(UpdateEventRequest.class)
+                );
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenUpdatePayloadIsInvalid()
+            throws Exception {
+
+        mockMvc.perform(
+                        put("/api/events/100")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                                .contentType(
+                                        MediaType.APPLICATION_JSON
+                                )
+                                .content("""
+                                    {
+                                      "name": "",
+                                      "description": "",
+                                      "location": "",
+                                      "startDate": null,
+                                      "endDate": null,
+                                      "capacity": 0,
+                                      "price": -1
+                                    }
+                                    """)
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(
+                        jsonPath("$.fieldErrors.name").exists()
+                )
+                .andExpect(
+                        jsonPath("$.fieldErrors.description").exists()
+                )
+                .andExpect(
+                        jsonPath("$.fieldErrors.location").exists()
+                )
+                .andExpect(
+                        jsonPath("$.fieldErrors.capacity").exists()
+                )
+                .andExpect(
+                        jsonPath("$.fieldErrors.price").exists()
+                );
+    }
+
+    @Test
+    void shouldPublishEventUsingAuthenticatedOrganizerId()
+            throws Exception {
+
+        EventResponse response =
+                new EventResponse(
+                        100L,
+                        10L,
+                        "Java Conference",
+                        "Description",
+                        "Petrópolis",
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
+                        100,
+                        new BigDecimal("50.00"),
+                        EventStatus.PUBLISHED,
+                        OffsetDateTime.parse(
+                                "2026-09-05T12:30:00-03:00"
+                        ),
+                        null,
+                        null
+                );
+
+        when(eventService.publishEvent(
+                100L,
+                10L
+        )).thenReturn(response);
+
+        mockMvc.perform(
+                        post("/api/events/100/publish")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(
+                        jsonPath("$.status")
+                                .value("PUBLISHED")
+                )
+                .andExpect(
+                        jsonPath("$.publishedAt").exists()
+                );
+
+        verify(eventService)
+                .publishEvent(
+                        100L,
+                        10L
+                );
+    }
+
+    @Test
+    void shouldReturnConflictWhenEventCannotBePublished()
+            throws Exception {
+
+        when(eventService.publishEvent(
+                100L,
+                10L
+        )).thenThrow(
+                new ConflictException(
+                        "Only draft events can be published"
+                )
+        );
+
+        mockMvc.perform(
+                        post("/api/events/100/publish")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                )
+                .andExpect(status().isConflict())
+                .andExpect(
+                        jsonPath("$.status").value(409)
+                )
+                .andExpect(
+                        jsonPath("$.message")
+                                .value(
+                                        "Only draft events can be published"
+                                )
+                );
+    }
+
+    @Test
+    void shouldCancelEventUsingAuthenticatedOrganizerId()
+            throws Exception {
+
+        EventResponse response =
+                new EventResponse(
+                        100L,
+                        10L,
+                        "Java Conference",
+                        "Description",
+                        "Petrópolis",
+                        OffsetDateTime.parse(
+                                "2026-10-10T10:00:00-03:00"
+                        ),
+                        OffsetDateTime.parse(
+                                "2026-10-10T18:00:00-03:00"
+                        ),
+                        100,
+                        new BigDecimal("50.00"),
+                        EventStatus.CANCELLED,
+                        null,
+                        null,
+                        null
+                );
+
+        when(eventService.cancelEvent(
+                100L,
+                10L
+        )).thenReturn(response);
+
+        mockMvc.perform(
+                        post("/api/events/100/cancel")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(
+                        jsonPath("$.status")
+                                .value("CANCELLED")
+                );
+
+        verify(eventService)
+                .cancelEvent(
+                        100L,
+                        10L
+                );
+    }
+
+    @Test
+    void shouldReturnConflictWhenEventCannotBeCancelled()
+            throws Exception {
+
+        when(eventService.cancelEvent(
+                100L,
+                10L
+        )).thenThrow(
+                new ConflictException(
+                        "Event cannot be cancelled in its current status"
+                )
+        );
+
+        mockMvc.perform(
+                        post("/api/events/100/cancel")
+                                .principal(
+                                        organizerAuthentication()
+                                )
+                )
+                .andExpect(status().isConflict())
+                .andExpect(
+                        jsonPath("$.status").value(409)
+                )
+                .andExpect(
+                        jsonPath("$.message")
+                                .value(
+                                        "Event cannot be cancelled in its current status"
+                                )
+                );
+    }
+
+
+    private UsernamePasswordAuthenticationToken organizerAuthentication() {
+        return new UsernamePasswordAuthenticationToken(
+                10L,
+                null,
+                List.of(
+                        new SimpleGrantedAuthority(
+                                "ROLE_ORGANIZER"
+                        )
+                )
+        );
+    }
+
+    private String validRequestBody() {
+        return """
+                {
+                  "name": "Java Conference",
+                  "description": "Backend conference",
+                  "location": "Petrópolis",
+                  "startDate": "2026-10-10T10:00:00-03:00",
+                  "endDate": "2026-10-10T18:00:00-03:00",
+                  "capacity": 100,
+                  "price": 50.00
+                }
+                """;
+    }
+
+    private UsernamePasswordAuthenticationToken participantAuthentication() {
+        return new UsernamePasswordAuthenticationToken(
+                20L,
+                null,
+                List.of(
+                        new SimpleGrantedAuthority(
+                                "ROLE_PARTICIPANT"
+                        )
+                )
+        );
+    }
+
+    private String validUpdateRequestBody() {
+        return """
+            {
+              "name": "Updated Event",
+              "description": "Updated description",
+              "location": "Teresópolis",
+              "startDate": "2026-11-10T10:00:00-03:00",
+              "endDate": "2026-11-10T18:00:00-03:00",
+              "capacity": 200,
+              "price": 75.00
+            }
+            """;
+    }
+}
