@@ -3,12 +3,15 @@ package br.com.eventflow.event;
 import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
 import br.com.eventflow.event.dto.UpdateEventRequest;
+import br.com.eventflow.registration.RegistrationRepository;
 import br.com.eventflow.shared.exception.*;
 import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRepository;
 import br.com.eventflow.user.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -36,6 +39,9 @@ class EventServiceTest {
     @Mock
     private EventCachedReadService eventCachedReadService;
 
+    @Mock
+    private RegistrationRepository registrationRepository;
+
     private EventService eventService;
 
     @BeforeEach
@@ -43,7 +49,8 @@ class EventServiceTest {
         eventService = new EventService(
                 eventRepository,
                 userRepository,
-                eventCachedReadService
+                eventCachedReadService,
+                registrationRepository
         );
     }
 
@@ -488,7 +495,7 @@ class EventServiceTest {
                 new BigDecimal("50.00")
         );
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         UpdateEventRequest request =
@@ -547,7 +554,7 @@ class EventServiceTest {
                 new BigDecimal("50.00")
         );
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         assertThrows(
@@ -569,17 +576,13 @@ class EventServiceTest {
                 "Java Conference",
                 "Description",
                 "Petrópolis",
-                OffsetDateTime.parse(
-                        "2026-10-10T10:00:00-03:00"
-                ),
-                OffsetDateTime.parse(
-                        "2026-10-10T18:00:00-03:00"
-                ),
+                OffsetDateTime.now().plusDays(7),
+                OffsetDateTime.now().plusDays(7).plusHours(8),
                 100,
                 new BigDecimal("50.00")
         );
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         EventResponse response =
@@ -621,7 +624,7 @@ class EventServiceTest {
                 )
         );
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         ConflictException exception =
@@ -641,7 +644,7 @@ class EventServiceTest {
 
     @Test
     void shouldReturnNotFoundWhenUpdatingUnknownEvent() {
-        when(eventRepository.findById(999L))
+        when(eventRepository.findByIdForUpdate(999L))
                 .thenReturn(Optional.empty());
 
         NotFoundException exception =
@@ -679,7 +682,7 @@ class EventServiceTest {
                 new BigDecimal("50.00")
         );
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         OffsetDateTime invalidDate =
@@ -727,7 +730,7 @@ class EventServiceTest {
                 new BigDecimal("50.00")
         );
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         NotFoundException exception =
@@ -751,7 +754,7 @@ class EventServiceTest {
 
         Event event = futureEvent(organizer);
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         EventResponse response =
@@ -780,7 +783,7 @@ class EventServiceTest {
                         .truncatedTo(ChronoUnit.MICROS)
         );
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         EventResponse response =
@@ -801,7 +804,7 @@ class EventServiceTest {
 
         Event event = futureEvent(owner);
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         NotFoundException exception =
@@ -821,7 +824,7 @@ class EventServiceTest {
 
     @Test
     void shouldReturnNotFoundWhenCancellingUnknownEvent() {
-        when(eventRepository.findById(999L))
+        when(eventRepository.findByIdForUpdate(999L))
                 .thenReturn(Optional.empty());
 
         assertThrows(
@@ -840,7 +843,7 @@ class EventServiceTest {
         Event event = futureEvent(organizer);
         event.cancel();
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         ConflictException exception =
@@ -877,7 +880,7 @@ class EventServiceTest {
                 new BigDecimal("50.00")
         );
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         ConflictException exception =
@@ -908,7 +911,7 @@ class EventServiceTest {
                 EventStatus.FINISHED
         );
 
-        when(eventRepository.findById(100L))
+        when(eventRepository.findByIdForUpdate(100L))
                 .thenReturn(Optional.of(event));
 
         ConflictException exception =
@@ -925,6 +928,46 @@ class EventServiceTest {
                 exception.getMessage()
         );
 
+        verify(eventRepository, never()).flush();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = EventStatus.class, names = {"PUBLISHED", "CANCELLED", "FINISHED"})
+    void shouldRejectUpdatingNonDraftEvent(EventStatus status) {
+        Event event = futureEvent(organizer(10L));
+        setEventStatusForTest(event, status);
+        when(eventRepository.findByIdForUpdate(100L))
+                .thenReturn(Optional.of(event));
+
+        ConflictException exception = assertThrows(
+                ConflictException.class,
+                () -> eventService.updateEvent(100L, 10L, validUpdateRequest())
+        );
+
+        assertEquals("Only draft events can be updated", exception.getMessage());
+        assertEquals(status, event.getStatus());
+        assertEquals("Java Conference", event.getName());
+        verify(eventRepository, never()).flush();
+    }
+
+    @Test
+    void shouldRejectPublishingEventThatAlreadyStarted() {
+        Event event = new Event(
+                organizer(10L), "Past Event", "Description", "Petrópolis",
+                OffsetDateTime.now().minusDays(1), OffsetDateTime.now().plusDays(1),
+                100, new BigDecimal("50.00")
+        );
+        when(eventRepository.findByIdForUpdate(100L))
+                .thenReturn(Optional.of(event));
+
+        ConflictException exception = assertThrows(
+                ConflictException.class,
+                () -> eventService.publishEvent(100L, 10L)
+        );
+
+        assertEquals("Event cannot be published after it has started", exception.getMessage());
+        assertEquals(EventStatus.DRAFT, event.getStatus());
+        assertNull(event.getPublishedAt());
         verify(eventRepository, never()).flush();
     }
 

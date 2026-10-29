@@ -28,7 +28,7 @@ public record CreateEventRequest(
         Integer capacity,
 
         @NotNull
-        @DecimalMin(value = "0.00")
+        @DecimalMin(value = "0.00", inclusive = false)
         @Digits(integer = 8, fraction = 2)
         BigDecimal price
 ) {

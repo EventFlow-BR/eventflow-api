@@ -8,6 +8,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
 @Configuration
 public class SecurityConfig {
@@ -16,24 +17,31 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtService jwtService,
-            @Value("${app.auth.cookie-name}") String cookieName
+            @Value("${app.auth.cookie-name}") String cookieName,
+            @Value("${app.auth.cookie-secure}") boolean cookieSecure
     ) throws Exception {
 
         JwtAuthenticationFilter jwtAuthenticationFilter =
                 new JwtAuthenticationFilter(jwtService, cookieName);
 
+        CookieCsrfTokenRepository csrfTokenRepository =
+                new CookieCsrfTokenRepository();
+        csrfTokenRepository.setCookieCustomizer(cookie -> cookie
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite("Lax")
+                .path("/")
+        );
+
         http
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
-                // Logout currently only clears the authentication cookie.
-                // It is temporarily excluded from CSRF protection until the final
-                // CSRF strategy for authenticated state-changing endpoints is implemented.
                 .csrf(csrf -> csrf
+                        .csrfTokenRepository(csrfTokenRepository)
                         .ignoringRequestMatchers(
                                 "/api/auth/register",
-                                "/api/auth/login",
-                                "/api/auth/logout"
+                                "/api/auth/login"
                         )
                 )
                 .authorizeHttpRequests(auth -> auth

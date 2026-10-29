@@ -9,6 +9,8 @@ import br.com.eventflow.shared.exception.GlobalExceptionHandler;
 import br.com.eventflow.shared.exception.NotFoundException;
 import br.com.eventflow.user.UserRole;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -25,6 +27,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -133,6 +136,32 @@ class EventControllerTest {
                 .andExpect(jsonPath("$.fieldErrors.endDate").exists())
                 .andExpect(jsonPath("$.fieldErrors.capacity").exists())
                 .andExpect(jsonPath("$.fieldErrors.price").exists());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0.00", "-1.00"})
+    void shouldRejectNonPositivePriceOnCreation(String price) throws Exception {
+        mockMvc.perform(post("/api/events")
+                        .principal(organizerAuthentication())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestBody().replace("50.00", price)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.price").exists());
+
+        verifyNoInteractions(eventService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0.00", "-1.00"})
+    void shouldRejectNonPositivePriceOnUpdate(String price) throws Exception {
+        mockMvc.perform(put("/api/events/100")
+                        .principal(organizerAuthentication())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validUpdateRequestBody().replace("75.00", price)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.price").exists());
+
+        verifyNoInteractions(eventService);
     }
 
     @Test

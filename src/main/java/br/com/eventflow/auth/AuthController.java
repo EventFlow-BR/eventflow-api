@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
@@ -74,6 +75,14 @@ public class AuthController {
                 authService.getCurrentUser(userId);
 
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/csrf")
+    public ResponseEntity<CsrfTokenResponse> csrf(CsrfToken csrfToken) {
+        return ResponseEntity.ok(new CsrfTokenResponse(
+                csrfToken.getHeaderName(),
+                csrfToken.getToken()
+        ));
     }
 
     @PostMapping("/logout")
