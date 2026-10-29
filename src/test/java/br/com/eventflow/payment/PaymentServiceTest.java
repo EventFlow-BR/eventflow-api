@@ -1,6 +1,8 @@
 package br.com.eventflow.payment;
 
 import br.com.eventflow.event.Event;
+import br.com.eventflow.event.EventRepository;
+import br.com.eventflow.event.EventStatus;
 import br.com.eventflow.payment.dto.PaymentResponse;
 import br.com.eventflow.payment.enums.PaymentStatus;
 import br.com.eventflow.registration.Registration;
@@ -13,11 +15,14 @@ import br.com.eventflow.user.User;
 import br.com.eventflow.user.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -34,6 +39,9 @@ class PaymentServiceTest {
     private PaymentRepository paymentRepository;
 
     @Mock
+    private EventRepository eventRepository;
+
+    @Mock
     private RegistrationRepository registrationRepository;
 
     @Mock
@@ -46,6 +54,7 @@ class PaymentServiceTest {
         paymentService =
                 new PaymentService(
                         paymentRepository,
+                        eventRepository,
                         registrationRepository,
                         applicationEventPublisher
                 );
@@ -70,6 +79,9 @@ class PaymentServiceTest {
                         OffsetDateTime.now()
                                 .plusMinutes(10)
                 );
+
+        when(eventRepository.findByRegistrationIdForUpdate(100L))
+                .thenReturn(Optional.of(registration.getEvent()));
 
         when(registrationRepository
                 .findByIdForUpdate(100L))
@@ -141,6 +153,10 @@ class PaymentServiceTest {
         verify(registrationRepository)
                 .findByIdForUpdate(100L);
 
+        var locks = inOrder(eventRepository, registrationRepository);
+        locks.verify(eventRepository).findByRegistrationIdForUpdate(100L);
+        locks.verify(registrationRepository).findByIdForUpdate(100L);
+
         verify(paymentRepository)
                 .save(any(Payment.class));
 
@@ -153,8 +169,8 @@ class PaymentServiceTest {
 
     @Test
     void shouldReturnNotFoundWhenRegistrationDoesNotExist() {
-        when(registrationRepository
-                .findByIdForUpdate(999L))
+        when(eventRepository
+                .findByRegistrationIdForUpdate(999L))
                 .thenReturn(Optional.empty());
 
         assertThrows(
@@ -167,8 +183,9 @@ class PaymentServiceTest {
 
         verifyNoInteractions(applicationEventPublisher);
 
-        verify(registrationRepository)
-                .findByIdForUpdate(999L);
+        verify(eventRepository)
+                .findByRegistrationIdForUpdate(999L);
+        verifyNoInteractions(registrationRepository);
 
         verifyNoInteractions(paymentRepository);
     }
@@ -191,6 +208,9 @@ class PaymentServiceTest {
                         OffsetDateTime.now()
                                 .plusMinutes(10)
                 );
+
+        when(eventRepository.findByRegistrationIdForUpdate(100L))
+                .thenReturn(Optional.of(registration.getEvent()));
 
         when(registrationRepository
                 .findByIdForUpdate(100L))
@@ -235,6 +255,9 @@ class PaymentServiceTest {
                 registration,
                 RegistrationStatus.CONFIRMED
         );
+
+        when(eventRepository.findByRegistrationIdForUpdate(100L))
+                .thenReturn(Optional.of(registration.getEvent()));
 
         when(registrationRepository
                 .findByIdForUpdate(100L))
@@ -286,6 +309,9 @@ class PaymentServiceTest {
                 RegistrationStatus.CANCELLED
         );
 
+        when(eventRepository.findByRegistrationIdForUpdate(100L))
+                .thenReturn(Optional.of(registration.getEvent()));
+
         when(registrationRepository
                 .findByIdForUpdate(100L))
                 .thenReturn(Optional.of(registration));
@@ -331,6 +357,9 @@ class PaymentServiceTest {
                                 .minusMinutes(1)
                 );
 
+        when(eventRepository.findByRegistrationIdForUpdate(100L))
+                .thenReturn(Optional.of(registration.getEvent()));
+
         when(registrationRepository
                 .findByIdForUpdate(100L))
                 .thenReturn(Optional.of(registration));
@@ -375,6 +404,9 @@ class PaymentServiceTest {
                         OffsetDateTime.now()
                                 .plusMinutes(10)
                 );
+
+        when(eventRepository.findByRegistrationIdForUpdate(100L))
+                .thenReturn(Optional.of(registration.getEvent()));
 
         when(registrationRepository
                 .findByIdForUpdate(100L))
@@ -436,6 +468,9 @@ class PaymentServiceTest {
                 RegistrationStatus.EXPIRED
         );
 
+        when(eventRepository.findByRegistrationIdForUpdate(100L))
+                .thenReturn(Optional.of(registration.getEvent()));
+
         when(registrationRepository
                 .findByIdForUpdate(100L))
                 .thenReturn(Optional.of(registration));
@@ -457,6 +492,54 @@ class PaymentServiceTest {
         verifyNoInteractions(applicationEventPublisher);
 
         verifyNoInteractions(paymentRepository);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = EventStatus.class, names = {"DRAFT", "CANCELLED", "FINISHED"})
+    void shouldRejectPaymentWhenEventIsNotPublished(EventStatus status) {
+        Event event = publishedEventWithPrice(10L, new BigDecimal("50.00"));
+        ReflectionTestUtils.setField(event, "status", status);
+        Registration registration = pendingRegistration(
+                100L, event, participant(20L), OffsetDateTime.now().plusMinutes(10)
+        );
+        stubLockedRegistration(registration);
+
+        ConflictException exception = assertThrows(
+                ConflictException.class, () -> paymentService.processPayment(100L, 20L)
+        );
+
+        assertEquals("Event is not available for payment", exception.getMessage());
+        assertEquals(RegistrationStatus.PENDING, registration.getStatus());
+        verifyNoInteractions(paymentRepository, applicationEventPublisher);
+    }
+
+    @Test
+    void shouldRejectPaymentAfterEventStarted() {
+        Event event = new Event(
+                organizer(10L), "Started event", "Description", "Petrópolis",
+                OffsetDateTime.now().minusDays(1), OffsetDateTime.now().plusDays(1),
+                100, new BigDecimal("50.00")
+        );
+        event.publish(OffsetDateTime.now().minusDays(2));
+        Registration registration = pendingRegistration(
+                100L, event, participant(20L), OffsetDateTime.now().plusMinutes(10)
+        );
+        stubLockedRegistration(registration);
+
+        ConflictException exception = assertThrows(
+                ConflictException.class, () -> paymentService.processPayment(100L, 20L)
+        );
+
+        assertEquals("Event has already started", exception.getMessage());
+        assertEquals(RegistrationStatus.PENDING, registration.getStatus());
+        verifyNoInteractions(paymentRepository, applicationEventPublisher);
+    }
+
+    private void stubLockedRegistration(Registration registration) {
+        when(eventRepository.findByRegistrationIdForUpdate(100L))
+                .thenReturn(Optional.of(registration.getEvent()));
+        when(registrationRepository.findByIdForUpdate(100L))
+                .thenReturn(Optional.of(registration));
     }
 
     private User participant(Long id) {

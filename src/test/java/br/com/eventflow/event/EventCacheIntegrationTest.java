@@ -161,7 +161,7 @@ class EventCacheIntegrationTest
     @Test
     void shouldReturnUpdatedEventAfterSuccessfulUpdate() {
         Event event =
-                createPublishedEvent();
+                createDraftEvent();
 
         Long eventId =
                 event.getEventId();
@@ -303,6 +303,12 @@ class EventCacheIntegrationTest
                 organizer.getUserId()
         );
 
+        assertEquals("PUBLISHED", jdbcTemplate.queryForObject(
+                "SELECT status FROM events WHERE event_id = ?", String.class, eventId
+        ));
+        Cache cache = cacheManager.getCache("events");
+        assertNotNull(cache);
+        assertNull(cache.get(eventId), "Event should have been evicted after publishing");
 
         EventResponse afterPublishing =
                 eventCachedReadService.getById(
@@ -454,6 +460,12 @@ class EventCacheIntegrationTest
     }
 
     private Event createPublishedEvent() {
+        Event event = createDraftEvent();
+        event.publish(OffsetDateTime.now().minusDays(1));
+        return eventRepository.saveAndFlush(event);
+    }
+
+    private Event createDraftEvent() {
         User organizer =
                 createOrganizer();
 
@@ -471,11 +483,6 @@ class EventCacheIntegrationTest
                         100,
                         new BigDecimal("50.00")
                 );
-
-        event.publish(
-                OffsetDateTime.now()
-                        .minusDays(1)
-        );
 
         return eventRepository
                 .saveAndFlush(event);

@@ -1,5 +1,8 @@
 package br.com.eventflow.payment;
 
+import br.com.eventflow.event.Event;
+import br.com.eventflow.event.EventRepository;
+import br.com.eventflow.event.EventStatus;
 import br.com.eventflow.payment.dto.PaymentResponse;
 import br.com.eventflow.registration.Registration;
 import br.com.eventflow.registration.RegistrationRepository;
@@ -18,15 +21,18 @@ import java.time.temporal.ChronoUnit;
 public class PaymentService {
 
     private final PaymentRepository paymentRepository;
+    private final EventRepository eventRepository;
     private final RegistrationRepository registrationRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
 
     public PaymentService(
             PaymentRepository paymentRepository,
+            EventRepository eventRepository,
             RegistrationRepository registrationRepository,
             ApplicationEventPublisher applicationEventPublisher
     ) {
         this.paymentRepository = paymentRepository;
+        this.eventRepository = eventRepository;
         this.registrationRepository = registrationRepository;
         this.applicationEventPublisher = applicationEventPublisher;
     }
@@ -36,6 +42,11 @@ public class PaymentService {
             Long registrationId,
             Long participantId
     ) {
+        // Match reservation's event lock before acquiring the registration lock.
+        // Load only the event here so registration state is read after both locks.
+        Event event = eventRepository.findByRegistrationIdForUpdate(registrationId)
+                .orElseThrow(() -> new NotFoundException("Registration not found"));
+
         Registration registration =
                 registrationRepository
                         .findByIdForUpdate(registrationId)
@@ -63,6 +74,14 @@ public class PaymentService {
                 now
         );
 
+        if (event.getStatus() != EventStatus.PUBLISHED) {
+            throw new ConflictException("Event is not available for payment");
+        }
+
+        if (!event.getStartDate().isAfter(now)) {
+            throw new ConflictException("Event has already started");
+        }
+
         if (paymentRepository
                 .existsByRegistration_RegistrationId(registrationId)) {
 
@@ -74,9 +93,7 @@ public class PaymentService {
         Payment payment =
                 new Payment(
                         registration,
-                        registration
-                                .getEvent()
-                                .getPrice()
+                        event.getPrice()
                 );
 
         registration.confirm();

@@ -3,6 +3,8 @@ package br.com.eventflow.event;
 import br.com.eventflow.event.dto.CreateEventRequest;
 import br.com.eventflow.event.dto.EventResponse;
 import br.com.eventflow.event.dto.UpdateEventRequest;
+import br.com.eventflow.registration.RegistrationRepository;
+import br.com.eventflow.registration.enums.RegistrationStatus;
 import br.com.eventflow.shared.exception.BadRequestException;
 import br.com.eventflow.shared.exception.ConflictException;
 import br.com.eventflow.shared.exception.ForbiddenException;
@@ -25,15 +27,18 @@ public class EventService {
     private final EventRepository eventRepository;
     private final UserRepository userRepository;
     private final EventCachedReadService eventCachedReadService;
+    private final RegistrationRepository registrationRepository;
 
     public EventService(
             EventRepository eventRepository,
             UserRepository userRepository,
-            EventCachedReadService eventCachedReadService
+            EventCachedReadService eventCachedReadService,
+            RegistrationRepository registrationRepository
     ) {
         this.eventRepository = eventRepository;
         this.userRepository = userRepository;
         this.eventCachedReadService = eventCachedReadService;
+        this.registrationRepository = registrationRepository;
     }
 
     @Transactional
@@ -151,7 +156,7 @@ public class EventService {
             UpdateEventRequest request
     ) {
         Event event =
-                eventRepository.findById(eventId)
+                eventRepository.findByIdForUpdate(eventId)
                         .orElseThrow(() ->
                                 new NotFoundException(
                                         "Event not found"
@@ -164,6 +169,12 @@ public class EventService {
 
             throw new NotFoundException(
                     "Event not found"
+            );
+        }
+
+        if (event.getStatus() != EventStatus.DRAFT) {
+            throw new ConflictException(
+                    "Only draft events can be updated"
             );
         }
 
@@ -202,7 +213,7 @@ public class EventService {
             Long organizerId
     ) {
         Event event =
-                eventRepository.findById(eventId)
+                eventRepository.findByIdForUpdate(eventId)
                         .orElseThrow(() ->
                                 new NotFoundException(
                                         "Event not found"
@@ -226,12 +237,16 @@ public class EventService {
             );
         }
 
-        event.publish(
-                OffsetDateTime.now()
-                        .truncatedTo(
-                                ChronoUnit.MICROS
-                        )
-        );
+        OffsetDateTime now = OffsetDateTime.now()
+                .truncatedTo(ChronoUnit.MICROS);
+
+        if (!event.getStartDate().isAfter(now)) {
+            throw new ConflictException(
+                    "Event cannot be published after it has started"
+            );
+        }
+
+        event.publish(now);
 
         eventRepository.flush();
 
@@ -250,7 +265,7 @@ public class EventService {
             Long organizerId
     ) {
         Event event =
-                eventRepository.findById(eventId)
+                eventRepository.findByIdForUpdate(eventId)
                         .orElseThrow(() ->
                                 new NotFoundException(
                                         "Event not found"
@@ -287,6 +302,15 @@ public class EventService {
         )) {
             throw new ConflictException(
                     "Event cannot be cancelled after it has started"
+            );
+        }
+
+        long activeRegistrations = registrationRepository.countOccupyingCapacity(
+                eventId, RegistrationStatus.CONFIRMED, RegistrationStatus.PENDING, now
+        );
+        if (activeRegistrations > 0) {
+            throw new ConflictException(
+                    "Event with active registrations cannot be cancelled"
             );
         }
 
