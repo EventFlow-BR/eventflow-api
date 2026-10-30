@@ -1,263 +1,132 @@
-# EventFlow Architecture
+# EventFlow architecture
 
-## Architectural Style
+## Runtime and package boundaries
 
-EventFlow starts as a **modular monolith**.
-
-The backend will initially be implemented as:
-
-* one Spring Boot application;
-* one codebase;
-* one deployable backend unit.
-
-The goal is to maintain clear business boundaries without introducing distributed-system complexity before it is justified.
-
-## Package Organization
-
-The application will be organized primarily by business domain.
-
-Initial structure:
+EventFlow is a domain-oriented modular monolith: one Spring Boot application, one PostgreSQL database, and synchronous domain operations inside local JPA transactions. Redis and RabbitMQ are supporting services. The RabbitMQ consumer runs in the same application, not in a separate microservice.
 
 ```text
-eventflow
-├── auth
-├── user
-├── event
-├── registration
-├── payment
-├── ticket
-└── shared
+HTTP client
+    |
+    v
+Spring Security: JWT cookie + CSRF
+    |
+    v
+Controllers --> transactional services --> JPA repositories --> PostgreSQL
+                    |                         (domain data + processed_messages)
+                    |-- event reads --> Spring Cache --> Redis
+                    |-- AFTER_COMMIT --> RabbitMQ --> consumer --> processor --> logging handler
+                    `-- AFTER_COMMIT --> registration counters
+
+Actuator / Micrometer --> health and Prometheus-format metrics
 ```
 
-Technical layers may exist inside each domain module when necessary.
+Packages under `src/main/java/br/com/eventflow`:
 
-Example:
+| Package | Current responsibility |
+|---|---|
+| `auth` | Registration/login, JWT generation/filtering, cookies, CSRF endpoint, security chain |
+| `user` | User entity, roles, persistence |
+| `event` | Event lifecycle, visibility, owner operations, cached DTO reads |
+| `registration` | Reservation/capacity, expiration scheduler, individual cancellation, events and metrics |
+| `registration.messaging` | Message contract, after-commit listeners, publisher/consumer, idempotency, DLQ replay |
+| `payment` | Simulated payment approval and atomic registration confirmation |
+| `shared` | Technical configuration and common HTTP error handling |
+| `ticket` | Placeholder only; no functional ticket flow |
+
+These boundaries are packages, not separate build modules or enforced independent services. Services use repositories across domains when coordinating a transaction: for example, PaymentService updates a Registration and EventService queries active registration counts. The implementation does not claim strict module isolation.
+
+## Transaction and concurrency boundaries
+
+| Operation | Transaction and locks |
+|---|---|
+| Reserve | JPA transaction; Event pessimistic write lock before availability, duplicate, capacity checks, and insert |
+| Pay | JPA transaction; Event lock, then Registration lock; validate after waiting; approve payment and confirm registration together |
+| Edit/publish/cancel event | JPA transaction; Event lock before state/ownership checks and mutation |
+| Cancel registration | JPA transaction; Registration lock; cancel and refund approved simulated payment together |
+| Expire reservations | JPA transaction; pessimistically lock overdue PENDING registrations, then mark EXPIRED |
+| Process message | JPA transaction; insert processed-message marker and handle in the same transaction |
+| Replay DLQ | RabbitMQ transaction; receive and republish together |
+
+Payment locates the Event with a subquery by registration ID before loading the Registration. This avoids preloading registration state before lock acquisition. Its Event lock is shared with reservation: an uncommitted valid payment cannot lose its capacity when the reservation timestamp passes and another participant requests the last place.
+
+Expiration and individual cancellation do not subsequently acquire an Event lock, so they do not introduce a reverse Registration → Event acquisition order. Locks last until transaction completion, including an outer transaction when present. Payment processing for one event is deliberately serialized to keep v1 capacity reasoning simple.
+
+See [EventRepository](../src/main/java/br/com/eventflow/event/EventRepository.java), [RegistrationRepository](../src/main/java/br/com/eventflow/registration/RegistrationRepository.java), [PaymentService](../src/main/java/br/com/eventflow/payment/PaymentService.java), and the [capacity regression test](../src/test/java/br/com/eventflow/payment/PaymentReservationCapacityConcurrencyIntegrationTest.java).
+
+## Messaging and delivery boundaries
 
 ```text
-event
-├── controller
-├── service
-├── repository
-├── dto
-├── mapper
-├── entity
-└── exception
+Payment / registration cancellation / expiration
+    --> application event inside JPA transaction
+    --> database commit
+    --> AFTER_COMMIT listener creates RegistrationMessage with UUID
+    --> JSON publication to eventflow.events
+    --> eventflow.registration.events
+    --> RegistrationEventConsumer
+    --> RegistrationMessageProcessor (JPA transaction)
+    --> processed_messages INSERT ... ON CONFLICT DO NOTHING
+    --> RegistrationMessageHandler
 ```
 
-Subpackages should only be created when corresponding implementation code exists.
+| Topology | Value |
+|---|---|
+| Main topic exchange | `eventflow.events` |
+| Durable queue | `eventflow.registration.events` |
+| Binding | `registration.*` |
+| Published routing keys | `registration.confirmed`, `registration.cancelled`, `registration.expired` |
+| Dead-letter topic exchange | `eventflow.events.dlx` |
+| Durable dead-letter queue | `eventflow.registration.events.dlq` |
+| Dead-letter routing key | `registration.dead` |
 
-Empty architectural placeholder packages should be avoided.
+The JSON converter trusts the registration messaging package. The contract carries message ID, registration/event/participant IDs, event type, and occurrence time. Reservation creation is used by local business metrics; it is not a fourth RabbitMQ publication flow.
 
-## Module Responsibilities
+Consumer retry is configured for three total attempts, 500 ms initial interval, multiplier 2, and a 2-second cap. Failures after retry are rejected without requeue; the queue's dead-letter configuration routes them to the DLQ. The current handler logs recognized event types and warns about unsupported/invalid types; such warnings do not themselves throw and trigger retry.
 
-### auth
+A new message ID is inserted into `processed_messages` before handling. A duplicate insert returns zero and processing is skipped. Concurrent deliveries of the same UUID are coordinated by PostgreSQL's unique primary key. If handling throws, the JPA transaction rolls back its marker, enabling another attempt. Deduplication is by message ID, not by registration ID or semantic equivalence.
 
-Responsible for authentication-related application flows, including:
+`RegistrationDeadLetterReprocessor.reprocessNext()` receives one DLQ message and republishes supported event types using `registrationReplayRabbitTemplate` and `rabbitTransactionManager`. It preserves the UUID; a failure rolls the broker transaction back. There is no replay HTTP endpoint, scheduler, or shipped CLI. See the replay integration tests for its invocation and rollback behavior.
 
-* account registration entry point;
-* login;
-* logout;
-* authenticated user retrieval;
-* Spring Security integration;
-* authentication cookie handling.
+**Accepted delivery limitation:** no Outbox or durable recovery of initial publication exists. Database commit and the normal RabbitTemplate send are not atomic, and publisher confirms/returns are not configured. A process/broker failure after commit may leave no delivered message; the DLQ cannot recover a message that never arrived. Consumer deduplication does not turn this into an exactly-once guarantee.
 
-The `auth` module does not own the User domain entity.
+The consumer currently logs events. It does not issue Ticket, send email, or perform an external financial operation. Extending that responsibility would require reconsidering delivery and side-effect guarantees.
 
-### user
+Sources: [RabbitMqConfig](../src/main/java/br/com/eventflow/shared/config/RabbitMqConfig.java), [messaging package](../src/main/java/br/com/eventflow/registration/messaging), [application properties](../src/main/resources/application.properties).
 
-Owns:
+## Read cache boundary
 
-* User;
-* User role;
-* user persistence;
-* user lookup;
-* identity-related domain data.
+`EventCachedReadService.getById()` uses Spring Cache for `EventResponse`, with cache `events`, logical key `eventId`, JSON serialization, and a default TTL of 10 minutes. This is a cache-aside read path backed by PostgreSQL. Listing is not cached.
 
-### event
+`EventService.getVisibleEvent()` calls the cached read and then evaluates visibility for the current caller every time. A successful authorization decision is not shared between users. The decision still uses cached attributes, so stale data is bounded by invalidation/TTL rather than a fresh database authorization query.
 
-Owns:
+Successful event update, publication, and cancellation evict the entry through `@CacheEvict`. This is not an atomic PostgreSQL/Redis operation or an explicit AFTER_COMMIT invalidation design. There is no custom Redis-error fallback. Redis stores neither user sessions nor authoritative registration/capacity state.
 
-* Event;
-* Event status;
-* Event lifecycle;
-* Event creation;
-* Event editing;
-* Event publication;
-* Event cancellation;
-* public Event queries;
-* Organizer Event queries.
+Sources: [EventCachedReadService](../src/main/java/br/com/eventflow/event/EventCachedReadService.java), [EventService](../src/main/java/br/com/eventflow/event/EventService.java), [CacheConfig](../src/main/java/br/com/eventflow/shared/config/CacheConfig.java).
 
-### registration
+## Observability boundary
 
-Owns:
+The default configuration exposes only health; the explicit local profile additionally exposes Prometheus. Public health hides component details while checking PostgreSQL, RabbitMQ, and Redis. When enabled, Prometheus output requires application authentication, without a separate operational role. The registry and counters remain active when HTTP metrics exposure is disabled.
 
-* Registration;
-* Registration lifecycle;
-* duplicate Registration rules;
-* Event capacity reservation;
-* reservation expiration;
-* participant cancellation;
-* Registration queries.
+`RegistrationMetrics` increments reserved, confirmed, cancelled, and expired counters through AFTER_COMMIT listeners. Rollback does not change those counters in the covered tests. They are process counters, not persisted business totals. No Prometheus server, dashboards, tracing system, or log aggregation service is provisioned.
 
-### payment
+Sources: [RegistrationMetrics](../src/main/java/br/com/eventflow/registration/RegistrationMetrics.java), [observability tests](../src/test/java/br/com/eventflow/observability).
 
-Owns:
+## Continuous integration boundary
 
-* Payment;
-* Payment status;
-* simulated payment processing;
-* approval;
-* failure;
-* expiration;
-* cancellation;
-* refund behavior.
+[Backend CI](../.github/workflows/backend-ci.yml) runs a single test job on pushes to `develop`/`main` and pull requests targeting those branches. It uses Temurin Java 21, Maven Wrapper dependency caching, and `./mvnw -B clean test`. PostgreSQL, RabbitMQ, and Redis are started by Testcontainers using Docker on the GitHub-hosted Ubuntu runner. The workflow has read-only repository permissions and performs no deployment.
 
-### ticket
+## Architectural decisions
 
-Owns:
+| Decision | Reason and trade-off |
+|---|---|
+| Modular monolith | Keeps business transactions and deployment simple; package boundaries are not independently deployed or strictly isolated |
+| Pessimistic Event locking | Serializes capacity-sensitive operations; lower per-event write concurrency is accepted |
+| Publication AFTER_COMMIT | Prevents messaging about rolled-back business operations; does not close the commit-to-send delivery gap |
+| Persisted idempotency | Makes duplicate UUID handling safe across consumer restarts and concurrent deliveries; marker retention has no automated cleanup |
+| Redis for read cache only | Avoids making reservation consistency depend on a distributed cache; cache freshness/failure remains a separate concern |
+| JWT HttpOnly cookie + CSRF | Keeps JWT out of response bodies/JavaScript while explicitly protecting cookie-authenticated writes |
+| Simulated payment | Exercises approval/refund and transaction boundaries without pretending to process real funds |
+| Paid events only | Avoids an incomplete free-event branch |
+| Reject event cancellation with active registrations | Avoids cascade, bulk refunds, and distributed compensation in v1 |
+| No Outbox | Accepts best-effort initial publication for the current logging consumer |
 
-* Ticket;
-* Ticket status;
-* Ticket issuance;
-* Ticket cancellation;
-* Participant Ticket queries;
-* public Ticket identification.
-
-### shared
-
-Contains only genuinely cross-cutting concerns.
-
-Examples may include:
-
-* global HTTP error representation;
-* shared technical configuration;
-* cross-cutting infrastructure components.
-
-Domain-specific behavior must not be moved into `shared`.
-
-The project should avoid premature generic abstractions such as:
-
-* `BaseService`;
-* `BaseRepository`;
-* `BaseEntity`;
-* generic mapper hierarchies;
-* generic utility layers without concrete value.
-
-## Domain Ownership
-
-Each module owns its business rules and persistence.
-
-A module should avoid directly modifying another module through that module's Repository.
-
-For example, Payment processing should request Registration confirmation through Registration behavior instead of modifying Registration persistence directly.
-
-The principle is:
-
-> Business rules remain in the module that owns the domain concept.
-
-## Cross-Module Collaboration
-
-Cross-module communication should:
-
-* minimize coupling;
-* preserve domain ownership;
-* avoid unnecessary direct Repository access;
-* avoid circular dependencies.
-
-Exact collaboration mechanisms will be defined when concrete use cases are implemented.
-
-Premature interfaces or abstraction layers should not be created only to simulate isolation.
-
-## Persistence Boundaries
-
-Each module manages persistence associated with its own entities.
-
-Cross-module Repository access should be avoided unless a concrete technical reason justifies it.
-
-The initial implementation may use synchronous service collaboration inside the monolith.
-
-Asynchronous communication will be introduced later only when RabbitMQ solves a concrete system problem.
-
-## JPA Relationships
-
-The persistence model should avoid unnecessarily large bidirectional entity graphs.
-
-Relationships will be defined based on actual navigation requirements.
-
-The project should avoid introducing JPA relationships only for convenience when they create:
-
-* unnecessary coupling;
-* circular serialization;
-* unexpected lazy loading;
-* N+1 query problems;
-* dangerous cascading behavior.
-
-## Deferred Modules
-
-### messaging
-
-The `messaging` module will not exist until RabbitMQ is introduced.
-
-At that point it may contain responsibilities such as:
-
-* message contracts;
-* producers;
-* consumers;
-* exchange and queue configuration;
-* routing configuration;
-* serialization.
-
-### notification
-
-Notification behavior will only be introduced when notification use cases are implemented.
-
-Notification may initially exist as part of the modular monolith.
-
-A later project phase may extract it into a dedicated `notification-service`.
-
-## Microservice Evolution
-
-No initial domain module will be extracted into a microservice.
-
-The system must first operate correctly as a modular monolith.
-
-A future Notification Service extraction will be used to study concepts such as:
-
-* asynchronous communication;
-* service boundaries;
-* partial failures;
-* retries;
-* idempotency;
-* distributed observability;
-* eventual consistency.
-
-## Future Architecture Evolution
-
-Planned learning areas include:
-
-* RabbitMQ;
-* asynchronous domain events;
-* messaging resilience;
-* Redis;
-* Testcontainers;
-* observability;
-* CI/CD;
-* Notification Service extraction;
-* cloud deployment;
-* Kubernetes;
-* optional Kafka experimentation.
-
-These technologies are not part of the initial architecture until their corresponding phase begins.
-
-## Architecture Principles
-
-EventFlow follows these principles:
-
-1. Prefer simple solutions until complexity is justified.
-2. Keep domain rules close to the domain that owns them.
-3. Avoid premature microservices.
-4. Avoid circular module dependencies.
-5. Avoid cross-module Repository access when possible.
-6. Keep `shared` small.
-7. Avoid abstractions without multiple concrete needs.
-8. Let architecture evolve when real system problems appear.
+Frontend, Ticket, notification/email, free events, a real gateway, cascade/bulk refunds, Outbox, Grafana, tracing/OpenTelemetry, microservices, Kafka, Kubernetes, and advanced reports are outside v1. They are possible extensions, not a roadmap commitment.
