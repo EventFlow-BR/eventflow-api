@@ -1,337 +1,127 @@
-# EventFlow Security Strategy
+# EventFlow v1 security
 
-## Overview
+The backend uses Spring Security, BCrypt, signed JWTs in an HttpOnly cookie, explicit CSRF protection, role checks, and ownership checks. It has no frontend, Bearer-header authentication, refresh-token flow, or Redis session store.
 
-EventFlow uses authentication and authorization rules designed for a web application with a separate frontend and backend.
-
-The initial security strategy uses:
-
-* Spring Security;
-* JWT;
-* HttpOnly cookies;
-* BCrypt;
-* role-based authorization;
-* resource ownership validation;
-* explicit CORS and CSRF considerations.
-
-Security decisions may evolve as new infrastructure and distributed components are introduced.
+Sources: [SecurityConfig](../src/main/java/br/com/eventflow/auth/SecurityConfig.java), [AuthController](../src/main/java/br/com/eventflow/auth/AuthController.java), [JwtAuthenticationFilter](../src/main/java/br/com/eventflow/auth/JwtAuthenticationFilter.java), and [JwtService](../src/main/java/br/com/eventflow/auth/JwtService.java).
 
 ## Authentication
 
-The initial authentication endpoints are expected to include:
+`POST /api/auth/register` validates a name, email, password, and one role: PARTICIPANT or ORGANIZER. Organizer registration is open; there is no administrative approval mechanism. Email is normalized and protected by a database unique constraint. Passwords are stored as BCrypt hashes.
+
+`POST /api/auth/login` verifies credentials and returns user information while setting the JWT cookie. The JWT is not returned in the JSON body. Its signed claims include the user ID as subject, role, issue time, and expiration. Signature and expiration are validated by the cookie authentication filter; malformed/expired tokens do not establish authentication.
+
+The JWT secret is interpreted as UTF-8 HMAC key bytes. Outside the local profile, `JWT_SECRET` is required. Supply an unpredictable private key of at least 32 bytes; never use the bundled local fallback in production. Default `JWT_EXPIRATION` is 3600000 milliseconds, or one hour. There is no custom issuer/audience configuration in this implementation.
+
+`GET /api/auth/me` resolves the authenticated user's current database information. JWT authentication is stateless: the filter establishes a principal from signed claims, not from a server-side login session. It does not reload the user's database record on every protected request.
+
+## Cookies
+
+| Cookie | Purpose | Attributes |
+|---|---|---|
+| `eventflow_token` | JWT authentication; name configurable via `app.auth.cookie-name` | HttpOnly, SameSite=Lax, Path=/, Secure configurable, max-age based on JWT expiration |
+| `XSRF-TOKEN` | Native cookie-backed CSRF repository | HttpOnly, SameSite=Lax, Path=/, same Secure setting; no explicit persistent max-age configured |
+
+`AUTH_COOKIE_SECURE` defaults to true and defaults to false under `local`, enabling host-local HTTP development. Retain Secure and use HTTPS for deployment. HttpOnly prevents direct JavaScript cookie access; it does not replace CSRF protection or defend against every consequence of XSS.
+
+## CSRF contract
 
 ```text
-POST /api/auth/register
-POST /api/auth/login
-POST /api/auth/logout
-GET  /api/auth/me
+register/login (public, CSRF-exempt)
+    --> JWT HttpOnly cookie
+    --> authenticated GET /api/auth/csrf
+    --> JSON {headerName, token} + XSRF-TOKEN cookie
+    --> mutating request with both cookies and header X-XSRF-TOKEN
+    --> native Spring Security CSRF validation
 ```
 
-### Login Flow
+`CookieCsrfTokenRepository` stores the CSRF token in its separate cookie. The endpoint materializes the token and returns the native request token; Spring Security's default token handling remains in place. Send the JSON `token` exactly as returned, rather than substituting the cookie's raw contents. No JavaScript access to JWT or CSRF cookies is needed.
 
-The login flow is conceptually:
+POST/PUT operations and logout require the CSRF cookie plus a valid header. Missing token/header, invalid token, or missing CSRF cookie is rejected with 403. A valid CSRF token does not grant a role or bypass ownership/business-state validation.
 
-```text
-credentials
-    ↓
-backend authentication
-    ↓
-JWT generation
-    ↓
-HttpOnly authentication cookie
-    ↓
-authenticated browser session
+The CSRF endpoint requires JWT authentication. It does not create an HTTP session/JSESSIONID for token storage. Login/register remain explicitly exempt; CSRF has not been disabled globally.
+
+Logout is `permitAll` at the authorization layer, but remains protected by the CSRF filter. The ordinary client obtains CSRF while authenticated before calling it. The controller clears the JWT cookie; it does not revoke an already-copied JWT, remove its signature validity, or implement refresh-token/blacklist storage.
+
+See [AuthCsrfIntegrationTest](../src/test/java/br/com/eventflow/auth/AuthCsrfIntegrationTest.java): it performs register/login, obtains the token over HTTP, and successfully creates/updates an event without `.with(csrf())`. It also checks missing/invalid token handling, logout, HttpOnly/Secure cookies, and unauthenticated token acquisition.
+
+## Authorization and visibility
+
+| Operation | Current rule |
+|---|---|
+| Register/login | Public and CSRF-exempt |
+| Current user / CSRF token | Authenticated |
+| Logout | CSRF-protected; permitAll authorization |
+| Event creation | ORGANIZER |
+| Event edit/publish/cancel | ORGANIZER and event owner, plus business eligibility |
+| Event list | Authenticated; participants see PUBLISHED, organizers see their own events |
+| Event by ID | PUBLISHED visible to either authenticated role; otherwise organizer owner only |
+| Reservation | PARTICIPANT, plus event/capacity/duplicate rules |
+| Payment / individual cancellation | PARTICIPANT and registration owner, plus business eligibility |
+| Health | Public, overall status only |
+| Prometheus | Exposed in local only by default; any authenticated user when enabled |
+
+Actor IDs come from the principal, not an ownership ID in request payloads. Request DTOs do not expose arbitrary status, password-hash, owner, or audit-field assignment. Database queries use JPA binding or parameterized native SQL.
+
+Owner-checked private operations hide another user's resource with 404. Business-state conflicts return 409, and DTO validation errors return 400. AuthService returns 401 for invalid login credentials or an invalid current-user lookup. The security chain does not configure a custom authentication entry point/JSON error contract; do not assume every missing/invalid JWT is returned as a standardized JSON 401. Role and CSRF failures are handled by Spring Security.
+
+Event visibility is checked in EventService outside EventCachedReadService, including on cache hits. The cache holds shared event data, not a user's successful authorization decision. Because cached status/owner attributes are used, this is not a guarantee of immediate visibility changes under stale cache data.
+
+## Local HTTP walkthrough
+
+The application must be running with the local profile as described in the [README](../README.md#running-locally). These optional Bash examples require `curl` and `jq` for JSON token extraction; neither is an application runtime dependency. Use a fresh local account email if the example has already been registered.
+
+```bash
+eventflow_base=http://localhost:8080
+eventflow_cookie_jar=$(mktemp)
+
+curl -fsS -X POST "$eventflow_base/api/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Demo Organizer","email":"demo-organizer@example.com","password":"local-demo-password","role":"ORGANIZER"}'
+
+curl -fsS -X POST "$eventflow_base/api/auth/login" \
+  -H 'Content-Type: application/json' \
+  -c "$eventflow_cookie_jar" \
+  -d '{"email":"demo-organizer@example.com","password":"local-demo-password"}'
+
+curl -fsS "$eventflow_base/api/auth/me" -b "$eventflow_cookie_jar"
+
+eventflow_csrf=$(curl -fsS "$eventflow_base/api/auth/csrf" \
+  -b "$eventflow_cookie_jar" -c "$eventflow_cookie_jar" | jq -er '.token')
 ```
 
-JWT represents the authentication token.
-
-The HttpOnly cookie represents how the browser stores and transports that token.
-
-The JWT must not be returned to the frontend for storage in `localStorage`.
-
-## Password Storage
-
-Passwords are never stored in plain text.
-
-The initial password hashing strategy uses BCrypt.
-
-The database stores only:
-
-```text
-password_hash
-```
-
-The following must never be exposed through API responses:
-
-* raw passwords;
-* password hashes.
-
-## Authentication Cookie
-
-Production authentication cookies are expected to use:
-
-```text
-HttpOnly = true
-Secure = true
-SameSite = Lax
-Path = /
-```
-
-Development configuration may disable `Secure` when the application runs locally over HTTP.
-
-The exact token expiration period will be defined during authentication implementation.
-
-## Authorization
-
-Authorization must consider more than the authenticated User role.
-
-The general model is:
-
-```text
-authentication
-+
-role
-+
-resource ownership
-+
-business state
-```
-
-### Participant Authorization
-
-Participants may access only their own private:
-
-* Registrations;
-* Tickets.
-
-A Participant cannot access another Participant's Registration or Ticket.
-
-### Organizer Authorization
-
-Organizers may manage only their own Events.
-
-Organizer access to Registration and occupancy information is limited to Registrations associated with Events owned by the authenticated Organizer.
-
-Having the `ORGANIZER` role does not grant access to every Event in the system.
-
-## Resource Ownership
-
-Protected resources must be validated against the authenticated User.
-
-Examples:
-
-```text
-Participant → Registration ownership
-Participant → Ticket ownership through Registration
-
-Organizer → Event ownership
-Organizer → Registration access through Event ownership
-```
-
-Ownership checks are part of authorization and must not rely only on client-provided identifiers.
-
-## HTTP Authorization Responses
-
-The initial API policy is:
-
-### 401 Unauthorized
-
-Used when authentication is required but:
-
-* authentication is missing;
-* authentication is invalid;
-* authentication has expired.
-
-### 403 Forbidden
-
-Used when an authenticated User is generally prohibited from performing an operation and revealing the authorization failure does not expose private resource existence.
-
-### 404 Not Found
-
-Used when:
-
-* the requested resource does not exist;
-* a private resource exists but belongs to another User.
-
-Returning `404` for foreign private resources reduces information disclosure about resource existence.
-
-## Public Access
-
-Unauthenticated users may:
-
-* list publicly visible Events;
-* view publicly visible Event details.
-
-Authentication is required for:
-
-* Registration operations;
-* Ticket access;
-* Organizer Event management;
-* private account information.
-
-## CORS
-
-During development, frontend and backend may run on different origins.
-
-For example:
-
-```text
-Frontend: http://localhost:5173
-Backend:  http://localhost:8080
-```
-
-Credentialed cross-origin requests therefore require explicit CORS configuration.
-
-The backend should:
-
-* allow only trusted frontend origins;
-* allow credentials;
-* avoid wildcard origins when credentials are enabled.
-
-CORS is a browser cross-origin policy.
-
-It is not a replacement for authentication or authorization.
-
-## CSRF
-
-HttpOnly cookies are automatically attached to eligible browser requests.
-
-Because EventFlow uses cookie-based authentication, CSRF must be explicitly considered.
-
-`HttpOnly` helps prevent JavaScript from directly reading the authentication cookie, but it does not by itself prevent Cross-Site Request Forgery.
-
-CSRF protection must not be disabled automatically only because the backend exposes REST endpoints.
-
-During implementation, the project will evaluate:
-
-* `SameSite` behavior;
-* trusted frontend origins;
-* Spring Security CSRF protection;
-* whether an explicit CSRF token is required.
-
-Any decision to disable or customize CSRF protection must be justified.
-
-## Logout
-
-Logout removes the authentication cookie from the browser.
-
-Because JWT is initially stateless, deleting the cookie does not cryptographically revoke a previously copied token.
-
-The initial MVP will rely on:
-
-* limited JWT expiration;
-* cookie removal on logout.
-
-The following mechanisms will not initially be introduced without a concrete requirement:
-
-* JWT blacklist;
-* refresh-token rotation;
-* Redis-backed session storage.
-
-## Sensitive Data
-
-Sensitive authentication data must never be logged.
-
-Application logs must not contain:
-
-* raw passwords;
-* password hashes;
-* complete JWT values;
-* authentication cookie contents.
-
-Personal data should only be logged when necessary for legitimate operational purposes.
-
-## DTO Boundaries and Mass Assignment
-
-API requests must use dedicated DTOs rather than binding external input directly to JPA entities.
-
-Clients must not be able to arbitrarily modify protected fields such as:
-
-* database identifiers;
-* password hashes;
-* lifecycle statuses;
-* audit timestamps;
-* authorization-sensitive ownership fields.
-
-Status changes must occur through explicit domain operations.
-
-For example, a Participant must not be able to directly confirm their own Registration by submitting:
+The CSRF response has this shape (the token is opaque and generated per flow):
 
 ```json
-{
-  "status": "CONFIRMED"
-}
+{"headerName":"X-XSRF-TOKEN","token":"<token returned by Spring Security>"}
 ```
 
-## SQL Injection
+A protected request without its header is rejected:
 
-Database access will use Spring Data JPA and parameterized persistence operations.
-
-Dynamic query construction must avoid directly concatenating untrusted external input into SQL.
-
-Using JPA does not remove the responsibility to review custom native queries or dynamically constructed queries.
-
-## Authentication Data Exposure
-
-Authentication responses must expose only the information required by the frontend.
-
-A `/me` response may contain information such as:
-
-```json
-{
-  "id": 10,
-  "name": "Example User",
-  "email": "user@example.com",
-  "role": "PARTICIPANT"
-}
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
+  "$eventflow_base/api/auth/logout" -b "$eventflow_cookie_jar"
+# 403
 ```
 
-It must not contain:
+Send the obtained token and preserve both cookies for a valid logout:
 
-* password hashes;
-* raw passwords;
-* JWT values;
-* internal authentication secrets.
+```bash
+curl -i -X POST "$eventflow_base/api/auth/logout" \
+  -b "$eventflow_cookie_jar" -c "$eventflow_cookie_jar" \
+  -H "X-XSRF-TOKEN: $eventflow_csrf"
+# 204 No Content; eventflow_token is cleared
 
-## Initial Security Matrix
+rm "$eventflow_cookie_jar"
+unset eventflow_csrf
+```
 
-| Operation                        | Public | Participant | Organizer |
-| -------------------------------- | :----: | :---------: | :-------: |
-| Register account                 |   Yes  |      —      |     —     |
-| Login                            |   Yes  |     Yes     |    Yes    |
-| Logout                           |   No   |     Yes     |    Yes    |
-| Get authenticated user           |   No   |     Yes     |    Yes    |
-| Browse public Events             |   Yes  |     Yes     |    Yes    |
-| View public Event                |   Yes  |     Yes     |    Yes    |
-| Register for Event               |   No   |     Yes     |     No    |
-| Cancel own Registration          |   No   |     Yes     |     No    |
-| View own Registrations           |   No   |     Yes     |     No    |
-| View own Tickets                 |   No   |     Yes     |     No    |
-| Create Event                     |   No   |      No     |    Yes    |
-| Edit own Event                   |   No   |      No     |    Yes    |
-| Publish own Event                |   No   |      No     |    Yes    |
-| Cancel own Event                 |   No   |      No     |    Yes    |
-| View Registrations for own Event |   No   |      No     |    Yes    |
-| View occupancy for own Event     |   No   |      No     |    Yes    |
-| Modify another Organizer's Event |   No   |      No     |     No    |
-| Directly approve Payment         |   No   |      No     |     No    |
-| Directly create Ticket           |   No   |      No     |     No    |
+Use the same cookie/header combination for event, reservation, payment, and cancellation writes. Obtain a token for each independently authenticated cookie jar/account. Do not commit or share cookie jars or real credentials.
 
-Organizer operations additionally require resource ownership and valid domain state.
+## Operational exposure and limits
 
-## Security Principles
-
-EventFlow follows these initial security principles:
-
-1. Never trust client-provided authorization-sensitive data.
-2. Authenticate before accessing protected resources.
-3. Validate role and resource ownership.
-4. Keep lifecycle changes behind explicit domain operations.
-5. Never expose password hashes or authentication tokens.
-6. Use restrictive CORS configuration.
-7. Treat CSRF explicitly because authentication uses cookies.
-8. Avoid logging sensitive information.
-9. Prefer least privilege.
-10. Return private resources only to authorized owners.
-11. Prefer `404 Not Found` for private resources owned by another User.
-12. Review security decisions again when distributed components are introduced.
+- Only health is exposed by Actuator in the default configuration; local also exposes Prometheus. Health omits component details publicly.
+- Prometheus has no dedicated operations role when enabled. It is not exposed in the production-like default configuration; explicitly re-enabling it requires considering deployment network/access policy.
+- No explicit CORS configuration is implemented. The current backend-only contract does not provision a cross-origin browser frontend or credentialed CORS allowlist.
+- GlobalExceptionHandler sanitizes unexpected application errors; the API does not intentionally return password hashes, JWT values in JSON, or stack traces.
+- The local Compose/profile contains known development credentials and a local JWT fallback; it is not a production security configuration.
+- HTTPS termination, production secrets, infrastructure exposure, and production smoke testing remain deployment work. This document describes implemented controls, not a completed production-security assessment.

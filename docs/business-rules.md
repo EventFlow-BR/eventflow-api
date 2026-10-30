@@ -1,377 +1,146 @@
-# EventFlow Business Rules
+# EventFlow v1 business rules
 
-This document describes the initial business rules defined for the EventFlow MVP.
+These rules describe the implemented backend services and HTTP contract. [Architecture](architecture.md) covers locks and messaging; [security](security.md) covers cookies and CSRF. There is no frontend in this version.
 
-These rules represent the current understanding of the domain and may evolve when new requirements or implementation constraints are discovered.
+## Actors and access
 
-## Actors
+Each account has one role, chosen during registration: `ORGANIZER` or `PARTICIPANT`. There is no administrator/role-approval workflow.
 
-The MVP initially supports two application roles:
+- Organizers create and manage their own events.
+- Participants reserve places, pay for their own registrations, and cancel them when eligible.
+- Event queries require authentication. Organizers do not gain access to private events owned by another organizer.
+- Operation actor IDs come from the authenticated principal, not a client-supplied ownership field.
+- Private resources belonging to another owner return 404 in the owner-checked operations.
+- No endpoints list a participant's registrations, event participants, occupancy, or tickets.
 
-* `PARTICIPANT`
-* `ORGANIZER`
+## Event creation and editing
 
-Each account has a single application role in the initial MVP.
+An event contains an organizer, name, description, location, start/end timestamps, capacity, price, and status. Creation sets `DRAFT`.
 
-## Public Access
+The HTTP DTOs require nonblank text, required timestamps, `capacity > 0`, `price > 0`, and monetary precision of at most eight integer and two fractional digits. The service requires `startDate < endDate`. Draft creation/editing does not separately require a future start date; publication does.
 
-Users do not need to authenticate to:
+Only the owner with ORGANIZER access can edit. Editing is a full PUT of the editable details and is permitted only for DRAFT. PUBLISHED, CANCELLED, and FINISHED editing is rejected with 409. Consequently, price, capacity, and dates cannot be changed after reservations become possible.
 
-* browse published events;
-* view publicly available event details.
-
-Authentication is required for operations involving:
-
-* registrations;
-* tickets;
-* private user data;
-* organizer event management.
-
-## Participant
-
-A Participant may:
-
-* register for eligible events;
-* cancel their own registration before the event starts;
-* list their own registrations;
-* view their own registrations;
-* list their own tickets;
-* view their own tickets.
-
-A Participant cannot:
-
-* create or manage events;
-* access registrations belonging to other participants;
-* access tickets belonging to other participants;
-* directly modify Payment status;
-* directly create Tickets;
-* directly modify protected domain status fields.
-
-## Organizer
-
-An Organizer may:
-
-* create events;
-* list their own events;
-* view their own events;
-* edit their own events when allowed;
-* publish their own events;
-* cancel their own events;
-* view registrations associated with their own events;
-* monitor occupancy of their own events.
-
-An Organizer cannot manage Events belonging to another Organizer.
-
-Authorization for organizer operations requires both:
-
-* the `ORGANIZER` role;
-* ownership of the requested Event.
-
-## Event Lifecycle
-
-The initial Event states are:
-
-* `DRAFT`
-* `PUBLISHED`
-* `CANCELLED`
-* `FINISHED`
-
-Valid transitions:
+## Event lifecycle and visibility
 
 ```text
-DRAFT ──publish──► PUBLISHED ──time──► FINISHED
-  │                    │
-cancel               cancel
-  │                    │
-  └──────► CANCELLED ◄──┘
+DRAFT --publish, future start--> PUBLISHED
+  |                                |
+  `--cancel if eligible------------+--> CANCELLED
+
+FINISHED: reserved state; no automatic or public transition in v1
 ```
 
-`CANCELLED` and `FINISHED` are terminal states.
+Publication requires DRAFT and `startDate > now`; it sets `published_at`. Republishing or publishing an already-started event returns 409.
 
-The following transitions are not allowed:
+Current query rules are deliberately narrower than historical-public-access plans:
 
-* `PUBLISHED → DRAFT`
-* `CANCELLED → DRAFT`
-* `CANCELLED → PUBLISHED`
-* `FINISHED → DRAFT`
-* `FINISHED → PUBLISHED`
+| Query | Behavior |
+|---|---|
+| Participant list | PUBLISHED events |
+| Organizer list | That organizer's events, across states |
+| Event by ID, PUBLISHED | Available to either authenticated role |
+| Event by ID, any other state | Available only to its organizer owner; others receive 404 |
 
-## Event Creation
+`published_at` is retained after cancellation, but is not used as a historical-public-visibility flag. Events do not automatically become FINISHED when time passes. An old PUBLISHED event may still be returned by reads, while time checks prevent new reservation/payment.
 
-Every Event is created as `DRAFT`.
+## Event cancellation
 
-A persisted Event must already contain the required information.
+The owner can cancel a DRAFT or PUBLISHED event only if:
 
-`DRAFT` means that the Event is valid but has not yet been published.
+1. The event has not started: `now < startDate`.
+2. There are zero active registrations.
 
-Initial Event rules include:
+Active registrations use the capacity query's definition: CONFIRMED, or PENDING with `reservationExpiresAt > now`. A PENDING reservation at/past its deadline does not block cancellation while waiting for the scheduler.
 
-* capacity must be greater than zero;
-* price must be greater than or equal to zero;
-* start date must be before end date;
-* start date must be in the future when the Event is created;
-* the Event must belong to an Organizer.
+CANCELLED/FINISHED events, started events, and events with active registrations are rejected with 409. Other-owner requests retain 404 behavior.
 
-A price of zero represents a free Event.
+The operation changes only the Event. There is no cascade, registration cancellation, refund in bulk, or additional event-cancellation message. Historical inactive registrations remain unchanged.
 
-## Event Editing
+## Reservation and capacity
 
-### DRAFT
+A PARTICIPANT can reserve only when:
 
-An Organizer may change:
-
-* name;
-* description;
-* location;
-* start date;
-* end date;
-* capacity;
-* price.
-
-### PUBLISHED
-
-An Organizer may change:
-
-* name;
-* description;
-* location;
-* capacity.
-
-After publication, the following fields become immutable in the MVP:
-
-* start date;
-* end date;
-* price.
-
-Capacity may never be reduced below the number of committed spots.
-
-### CANCELLED and FINISHED
-
-Business-relevant Event changes are not allowed.
-
-## Event Visibility
-
-Published Events remain publicly accessible after becoming:
-
-* `CANCELLED`;
-* `FINISHED`.
-
-This preserves historical information for participants.
-
-An Event cancelled while still in `DRAFT` remains private because it was never publicly published.
-
-The system must preserve whether an Event has ever been published.
-
-## Registration Lifecycle
-
-The initial Registration states are:
-
-* `PENDING`
-* `CONFIRMED`
-* `CANCELLED`
-
-`CANCELLED` is terminal.
-
-A cancelled Registration is not reactivated.
-
-If a participant becomes eligible again, a new Registration must be created.
-
-## Free Event Registration
-
-For a free Event:
+- The Event is PUBLISHED and has not started.
+- The participant exists with the participant role.
+- That participant has no active registration for the event.
+- Occupied capacity is below event capacity.
 
 ```text
-Participant registers
-        ↓
-Registration CONFIRMED
-        ↓
-Ticket issued
+occupied capacity = CONFIRMED registrations
+                  + PENDING registrations with reservationExpiresAt > now
 ```
 
-The confirmed Registration immediately consumes Event capacity.
+Every reservation starts as PENDING with deadline `now + reservation timeout`; the default timeout is 15 minutes. No Payment is created during reservation. There is no free-event confirmation branch.
 
-## Paid Event Registration
+The Event pessimistic lock protects duplicate/capacity checks and insert. The application does not reactivate old registrations: cancellation or logical expiration permits a new reservation, subject to normal event/capacity rules.
 
-For a paid Event:
+A reservation at/past its deadline no longer occupies capacity even if its persisted status is still PENDING. This distinction is also used by duplicate detection and event cancellation.
+
+## Payment simulation
+
+Only the registration owner with PARTICIPANT access can invoke payment. Payment first locks the Event, then the Registration, and obtains the validation time after those locks.
+
+Eligibility requires:
 
 ```text
-Participant registers
-        ↓
-Registration PENDING
-        ↓
-Payment PENDING
-        ↓
-temporary capacity reservation
+Registration == PENDING
+AND reservationExpiresAt > now
+AND Event == PUBLISHED
+AND Event.startDate > now
+AND no existing Payment for this registration
 ```
 
-The initial reservation timeout is 15 minutes.
+Invalid state, expiration, event unavailability, or duplicate payment is rejected with 409. Another owner's registration is hidden with 404. Rejection creates no Payment, does not confirm the Registration, and publishes no confirmation event.
 
-A valid `PENDING` Registration consumes one Event spot during the reservation period.
+On success, a Payment is created directly as APPROVED using the event price, and the registration becomes CONFIRMED in the same JPA transaction. The Payment stores its own amount. The event cannot be edited after publication, so the supported API cannot change that price after reservation.
 
-## Committed Capacity
+A valid payment holding the Event lock can commit after the reservation's timestamp passes: another reservation waits for that lock and then sees the confirmed place. A payment that acquires its locks only after expiration fails eligibility. This is not a real gateway, external capture, or financial settlement.
 
-Committed spots are:
+## Individual cancellation and refund
 
-```text
-CONFIRMED registrations
-+
-non-expired PENDING registrations
-```
+The participant owner may cancel a registration before the event starts if its state is:
 
-Available capacity is:
+- PENDING with an unexpired reservation; or
+- CONFIRMED with an APPROVED simulated Payment.
 
-```text
-event capacity - committed spots
-```
+The operation locks the Registration. A valid pending cancellation sets CANCELLED without refund. A confirmed cancellation sets its Payment to REFUNDED and its Registration to CANCELLED in one transaction. Missing/non-approved payment for a confirmed registration causes conflict rather than silently proceeding.
 
-Expired and cancelled registrations do not consume capacity.
+Expired, already-cancelled, or otherwise ineligible registrations are rejected with 409. Cancellation frees capacity on transaction completion. Refund is a state change for the entire stored simulated payment, not an external money transfer. There are no partial refunds, fees, or separate refund endpoints.
 
-## Registration Eligibility
+## Expiration
 
-A Participant may create a new Registration only when:
+The scheduler uses a fixed delay of 60 seconds by default. It locks PENDING registrations whose deadlines satisfy `reservationExpiresAt <= now`, changes them to EXPIRED, and emits expiration application events in that transaction.
 
-* the Event is `PUBLISHED`;
-* the Event has not started;
-* available capacity exists;
-* the Participant does not already have an active Registration for that Event.
+Expiration does not create or expire a Payment. Payment does not exist until simulated approval. Expired registrations are historical records, not CANCELLED registrations and not reactivated reservations.
 
-Active registrations are:
+## Implemented states
 
-* valid `PENDING`;
-* `CONFIRMED`.
+| Aggregate | States used by current flows | Reserved values without a current flow |
+|---|---|---|
+| Event | DRAFT, PUBLISHED, CANCELLED | FINISHED |
+| Registration | PENDING, CONFIRMED, CANCELLED, EXPIRED | None |
+| Payment | APPROVED, REFUNDED | PENDING, FAILED, EXPIRED, CANCELLED |
 
-A previous `CANCELLED` Registration does not prevent a future Registration attempt.
+Normal registration transitions are PENDING → CONFIRMED, PENDING → EXPIRED, PENDING → CANCELLED, and CONFIRMED → CANCELLED. A new eligible reservation creates a new record.
 
-## Reservation Expiration
+## Transactional side effects
 
-When a paid Registration reservation reaches its expiration time without valid payment approval:
+- Reservation creation emits a local event used for the reserved counter.
+- Confirmation, individual cancellation, and expiration emit application events used for RabbitMQ publication and business counters.
+- RabbitMQ publication and counter increments use AFTER_COMMIT listeners; rollback does not trigger those side effects in the covered tests.
+- Consumer processing currently logs the registration events; it does not produce a Ticket or email.
+- Post-commit publication is not durable through an Outbox; its delivery limitations are documented in [architecture](architecture.md#messaging-and-delivery-boundaries).
 
-```text
-Payment → EXPIRED
-Registration → CANCELLED
-Capacity → released
-```
+## Deliberately outside v1
 
-Expiration is strict.
+Free events, tickets/check-in, notifications/email, real payment processing, event-cancellation cascade, bulk refunds, and additional registration/participant/occupancy queries are not implemented features. Future extensions are optional and do not change this contract.
 
-Payment approval processed after the reservation expiration time cannot confirm the expired Registration.
+## Implementation references
 
-If money was captured after expiration, the system must execute a compensation flow that results in refund.
-
-## Registration Cancellation
-
-Participants may voluntarily cancel `PENDING` or `CONFIRMED` registrations before the Event starts.
-
-Cancellation releases capacity.
-
-For paid confirmed registrations, voluntary cancellation before the Event starts generates a full refund.
-
-## Event Cancellation
-
-When an Organizer cancels an Event:
-
-* active `PENDING` registrations become `CANCELLED`;
-* active `CONFIRMED` registrations become `CANCELLED`;
-* pending payments are cancelled;
-* approved payments require full refund;
-* active tickets become `CANCELLED`.
-
-The Event remains publicly visible if it had previously been published.
-
-## Finished Events
-
-When an Event becomes `FINISHED`, confirmed Registrations remain `CONFIRMED`.
-
-This preserves the historical outcome of the registration.
-
-## Payment Lifecycle
-
-The initial Payment states are:
-
-* `PENDING`
-* `APPROVED`
-* `FAILED`
-* `EXPIRED`
-* `CANCELLED`
-* `REFUNDED`
-
-Normal transitions include:
-
-```text
-PENDING → APPROVED
-PENDING → FAILED
-PENDING → EXPIRED
-PENDING → CANCELLED
-APPROVED → REFUNDED
-```
-
-Payment exists only for paid Events.
-
-Payment processing will initially be simulated internally.
-
-No real payment gateway belongs to the initial MVP.
-
-## Refund Policy
-
-The MVP uses full automatic refunds.
-
-A Payment must be refunded when:
-
-* a participant cancels a confirmed paid Registration before the Event starts;
-* an Organizer cancels the Event after payment approval;
-* a Payment is approved after its reservation has already expired.
-
-The MVP does not initially support:
-
-* partial refunds;
-* cancellation fees;
-* non-refundable tickets;
-* configurable refund deadlines.
-
-## Ticket Lifecycle
-
-The initial Ticket states are:
-
-* `ACTIVE`
-* `CANCELLED`
-
-A Ticket is created only after a Registration becomes `CONFIRMED`.
-
-Each confirmed Registration has exactly one Ticket.
-
-Participants cannot create Tickets directly.
-
-When a confirmed Registration is cancelled:
-
-```text
-Ticket ACTIVE → CANCELLED
-```
-
-When an Event finishes normally, the Ticket remains `ACTIVE` as historical evidence that a valid Ticket was issued.
-
-Check-in and ticket usage tracking are outside the initial MVP.
-
-## Out of Scope for the Initial MVP
-
-The following features are intentionally excluded from the initial MVP:
-
-* social login;
-* password recovery;
-* email verification;
-* event recommendations;
-* ratings and reviews;
-* favorites;
-* advanced search;
-* multiple ticket types;
-* ticket batches;
-* coupons;
-* promotional codes;
-* waiting lists;
-* seat selection;
-* ticket transfers;
-* QR Code check-in;
-* attendance tracking;
-* real payment gateway integration;
-* organizer organizations and teams;
-* admin dashboard;
-* advanced analytics and reports.
+- [EventService](../src/main/java/br/com/eventflow/event/EventService.java)
+- [Event DTOs](../src/main/java/br/com/eventflow/event/dto)
+- [RegistrationService](../src/main/java/br/com/eventflow/registration/RegistrationService.java)
+- [PaymentService](../src/main/java/br/com/eventflow/payment/PaymentService.java)
+- [RegistrationCancellationService](../src/main/java/br/com/eventflow/registration/RegistrationCancellationService.java)
+- [RegistrationExpirationService](../src/main/java/br/com/eventflow/registration/RegistrationExpirationService.java)
