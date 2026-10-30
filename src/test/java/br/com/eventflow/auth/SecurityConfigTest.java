@@ -36,7 +36,8 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
         "app.jwt.secret=eventflow-test-secret-key-with-at-least-32-bytes",
         "app.jwt.expiration=3600000",
         "app.auth.cookie-name=eventflow_token",
-        "app.auth.cookie-secure=false"
+        "app.auth.cookie-secure=false",
+        "management.endpoints.web.exposure.include=health,prometheus"
 })
 @Import(SecurityConfigTest.TestEndpointsConfiguration.class)
 class SecurityConfigTest
